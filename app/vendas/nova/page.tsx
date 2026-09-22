@@ -181,7 +181,6 @@ export default function NovaVendaPage() {
     setPrecoUnitarioInput(0);
   };
 
-  // Permite alterar o preço unitário diretamente na tabela do carrinho
   const atualizarPrecoItemCarrinho = (produto_id: string, novoPreco: number) => {
     const precoValido = Math.max(0, novoPreco);
     setCarrinho(
@@ -197,7 +196,6 @@ export default function NovaVendaPage() {
     );
   };
 
-  // Permite alterar a quantidade diretamente na tabela do carrinho
   const atualizarQuantidadeItemCarrinho = (produto_id: string, novaQtd: number) => {
     const produto = produtos.find((p) => p.id === produto_id);
     const qtdValida = Math.max(1, novaQtd);
@@ -305,7 +303,7 @@ export default function NovaVendaPage() {
           </button>
         </div>
 
-        {/* Painel 1: Seleção do Cliente (Destaque Centralizado) */}
+        {/* Painel 1: Seleção do Cliente */}
         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-4">
           <h2 className="text-lg font-semibold text-slate-200 border-b border-slate-800 pb-2 text-center sm:text-left">
             1. Identificação do Cliente
@@ -411,7 +409,7 @@ export default function NovaVendaPage() {
           </div>
         </div>
 
-        {/* Painel 3: Tabela do Carrinho (com Edição de Preço Unitário e Subtotal) */}
+        {/* Painel 3: Tabela do Carrinho */}
         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-4">
           <h2 className="text-lg font-semibold text-slate-200 border-b border-slate-800 pb-2">
             3. Itens Adicionados
@@ -483,7 +481,7 @@ export default function NovaVendaPage() {
           </div>
         </div>
 
-        {/* Painel 4: Pagamento e Finalização */}
+        {/* Painel 4: Pagamento e Fechamento */}
         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-6">
           <h2 className="text-lg font-semibold text-slate-200 border-b border-slate-800 pb-2">
             4. Pagamento e Fechamento
@@ -536,7 +534,6 @@ export default function NovaVendaPage() {
             </div>
           </div>
 
-          {/* Resumo Financeiro */}
           <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 space-y-1 text-right">
             <div className="text-sm font-medium text-slate-400">
               Subtotal: <span className="font-semibold text-slate-200">R$ {subtotalGeral.toFixed(2)}</span>
