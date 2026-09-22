@@ -199,11 +199,11 @@ export default function MovimentacoesEstoquePage() {
           </div>
           <div className="flex items-center gap-3 w-full sm:w-auto">
             <Link
-              href="/estoque/ajuste"
-              className="flex-1 sm:flex-none text-center px-4 py-2 text-sm font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors shadow-sm"
-            >
-              + Ajuste Manual
-            </Link>
+  href="/estoque/movimentar"
+  className="flex-1 sm:flex-none text-center px-4 py-2 text-sm font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors shadow-sm"
+>
+  + Ajuste Manual
+</Link>
             <Link
               href="/"
               className="flex-1 sm:flex-none text-center px-4 py-2 text-sm font-medium bg-slate-800 text-slate-200 hover:bg-slate-700 rounded-lg transition-colors border border-slate-700"
