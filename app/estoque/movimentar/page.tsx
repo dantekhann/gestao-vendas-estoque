@@ -23,10 +23,16 @@ export default function MovimentarEstoquePage() {
   const [produtoId, setProdutoId] = useState<string>('');
   const [tipoMovimentacao, setTipoMovimentacao] = useState<'ENTRADA' | 'SAIDA' | 'AJUSTE'>('ENTRADA');
   const [quantidade, setQuantidade] = useState<number>(1);
+  
+  // Data da ação (preenchida com a data de hoje por padrão, sem hora)
+  const [dataMovimentacao, setDataMovimentacao] = useState<string>(
+    new Date().toISOString().split('T')[0]
+  );
+
   const [observacao, setObservacao] = useState<string>('');
   const [salvando, setSalvando] = useState<boolean>(false);
 
-  // Carrega TODOS os itens (Insumos, Embalagens, Produto Final, Almoxarifado)
+  // Carrega todos os itens
   useEffect(() => {
     async function carregarProdutos() {
       try {
@@ -71,10 +77,20 @@ export default function MovimentarEstoquePage() {
       return;
     }
 
+    if (!dataMovimentacao) {
+      alert('Informe a data da movimentação.');
+      return;
+    }
+
     setSalvando(true);
 
     try {
-      // 1. Registra a movimentação no histórico
+      // Formata a observação incluindo a data escolhida para que fique visível no histórico
+      const obsFinal = `[Data: ${dataMovimentacao}] ${
+        observacao || `Lançamento manual de ${tipoMovimentacao.toLowerCase()}`
+      }`;
+
+      // 1. Registra a movimentação no histórico usando a coluna existente 'observacao'
       const { error: errorMov } = await supabase
         .from('movimentacoes_estoque')
         .insert([
@@ -82,13 +98,13 @@ export default function MovimentarEstoquePage() {
             produto_id: produtoId,
             tipo: tipoMovimentacao,
             quantidade: quantidade,
-            observacao: observacao || `Lançamento manual de ${tipoMovimentacao.toLowerCase()}`,
+            observacao: obsFinal,
           },
         ]);
 
       if (errorMov) throw errorMov;
 
-      // 2. Se o banco não possuir Trigger automático, atualiza o estoque diretamente na tabela produtos:
+      // 2. Atualiza o estoque diretamente na tabela produtos
       let novoEstoque = produtoSelecionado?.estoque_atual || 0;
       if (tipoMovimentacao === 'ENTRADA') novoEstoque += quantidade;
       if (tipoMovimentacao === 'SAIDA') novoEstoque -= quantidade;
@@ -220,19 +236,34 @@ export default function MovimentarEstoquePage() {
             </div>
           </div>
 
-          {/* Quantidade */}
-          <div>
-            <label className="block text-sm font-semibold text-slate-300 mb-1">
-              {tipoMovimentacao === 'AJUSTE' ? 'Nova Quantidade Exata do Estoque' : 'Quantidade a Movimentar'}
-            </label>
-            <input
-              type="number"
-              min="0"
-              value={quantidade}
-              onChange={(e) => setQuantidade(Number(e.target.value))}
-              className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 font-medium focus:ring-2 focus:ring-blue-500 outline-none"
-              required
-            />
+          {/* Linha com Quantidade e Data da Ação */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-semibold text-slate-300 mb-1">
+                {tipoMovimentacao === 'AJUSTE' ? 'Nova Quantidade Exata' : 'Quantidade a Movimentar'}
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={quantidade}
+                onChange={(e) => setQuantidade(Number(e.target.value))}
+                className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-300 mb-1">
+                Data da Ação
+              </label>
+              <input
+                type="date"
+                value={dataMovimentacao}
+                onChange={(e) => setDataMovimentacao(e.target.value)}
+                className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+                required
+              />
+            </div>
           </div>
 
           {/* Observação / Nota / Fornecedor */}
