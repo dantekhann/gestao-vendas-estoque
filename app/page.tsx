@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
 interface Produto {
@@ -10,119 +10,142 @@ interface Produto {
   nome: string;
   preco_venda: number;
   estoque_atual: number;
+  tipo: string;
 }
 
 export default function DashboardPage() {
+  const router = useRouter();
+
   const [produtos, setProdutos] = useState<Produto[]>([]);
-  const [carregando, setCarregando] = useState(true);
+  const [carregando, setCarregando] = useState<boolean>(true);
+  const [erro, setErro] = useState<string | null>(null);
+
+  // Formata os tipos para exibição na tela (ex: PRODUTO_FINAL -> PRODUTO FINAL)
+  const formatarTipo = (tipo: string) => {
+    if (!tipo) return '';
+    return tipo.replace(/_/g, ' ');
+  };
 
   useEffect(() => {
-    async function carregarDashboard() {
-      setCarregando(true);
-      const { data, error } = await supabase
-        .from('produtos')
-        .select('id, sku, nome, preco_venda, estoque_atual')
-        .order('nome');
+    let montado = true;
 
-      if (!error && data) {
-        setProdutos(data);
+    async function carregarProdutos() {
+      try {
+        setCarregando(true);
+        setErro(null);
+
+        // Busca todos os produtos ordenando pelos maiores estoques no topo
+        const { data, error } = await supabase
+          .from('produtos')
+          .select('id, sku, nome, preco_venda, estoque_atual, tipo')
+          .order('estoque_atual', { ascending: false });
+
+        if (error) throw error;
+
+        if (montado && data) {
+          setProdutos(data);
+        }
+      } catch (err: any) {
+        console.error('Erro ao carregar estoque:', err);
+        if (montado) {
+          setErro(err.message || 'Erro ao conectar com o banco de dados.');
+        }
+      } finally {
+        if (montado) {
+          setCarregando(false);
+        }
       }
-      setCarregando(false);
     }
-    carregarDashboard();
+
+    carregarProdutos();
+
+    return () => {
+      montado = false;
+    };
   }, []);
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 p-8">
+    <div className="min-h-screen bg-slate-950 text-slate-100 p-6">
       <div className="max-w-6xl mx-auto space-y-6">
-        {/* Topo / Cabeçalho */}
-        <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+        
+        {/* Cabeçalho */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900 p-5 rounded-xl border border-slate-800 shadow-md">
           <div>
-            <h1 className="text-2xl font-bold text-emerald-400">OrC Brasil — Gestão de Stock e Vendas</h1>
-            <p className="text-xs text-slate-400">Painel Principal / Dashboard</p>
+            <h1 className="text-2xl font-bold text-white">Visão Geral do Estoque</h1>
+            <p className="text-sm text-slate-400">Gestão de produtos e insumos - OrC Brasil</p>
           </div>
-          <Link
-            href="/vendas/nova"
-            className="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-4 py-2 rounded-lg text-sm transition-colors shadow-lg shadow-emerald-950/50"
-          >
-            + Registar Nova Venda
-          </Link>
-        </div>
-
-        {/* Resumo de Indicadores */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl">
-            <p className="text-xs text-slate-400">Total de Produtos em Catálogo</p>
-            <p className="text-2xl font-bold font-mono text-slate-100 mt-1">{produtos.length}</p>
-          </div>
-          <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl">
-            <p className="text-xs text-slate-400">Produtos em Alerta de Stock (&le; 10)</p>
-            <p className="text-2xl font-bold font-mono text-amber-400 mt-1">
-              {produtos.filter((p) => p.estoque_atual <= 10).length}
-            </p>
-          </div>
-          <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl">
-            <p className="text-xs text-slate-400">Produtos Esgotados</p>
-            <p className="text-2xl font-bold font-mono text-red-400 mt-1">
-              {produtos.filter((p) => p.estoque_atual <= 0).length}
-            </p>
+          
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => router.push('/vendas/nova')}
+              className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-5 py-2.5 rounded-lg shadow-sm transition-colors flex items-center gap-2"
+            >
+              <span className="text-lg">+</span>
+              <span>Nova Venda</span>
+            </button>
           </div>
         </div>
 
-        {/* Tabela de Produtos / Stock */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
-          <h2 className="text-sm font-semibold text-slate-200 uppercase tracking-wider">
-            Visão Geral do Stock de Produtos
-          </h2>
-
+        {/* Tabela de Produtos em Tom Escuro */}
+        <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md">
           {carregando ? (
-            <p className="text-xs text-slate-500 py-6 text-center">A carregar produtos do banco de dados...</p>
-          ) : produtos.length === 0 ? (
-            <p className="text-xs text-slate-500 py-6 text-center">Nenhum produto cadastrado.</p>
+            <div className="p-8 text-center text-slate-400 animate-pulse font-medium">
+              A carregar produtos do banco de dados...
+            </div>
+          ) : erro ? (
+            <div className="p-4 border border-red-500/30 bg-red-950/50 text-red-400 rounded-lg text-sm">
+              {erro}
+            </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-950 text-slate-400 uppercase font-mono border-b border-slate-800">
-                  <tr>
-                    <th className="py-3 px-4">SKU</th>
-                    <th className="py-3 px-4">Produto</th>
-                    <th className="py-3 px-4">Preço Venda</th>
-                    <th className="py-3 px-4">Stock Atual</th>
-                    <th className="py-3 px-4">Estado</th>
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-800 bg-slate-950/50 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                    <th className="p-3.5">SKU</th>
+                    <th className="p-3.5">Nome</th>
+                    <th className="p-3.5">Categoria/Tipo</th>
+                    <th className="p-3.5 text-right">Estoque</th>
+                    <th className="p-3.5 text-right">Preço de Venda</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
-                  {produtos.map((p) => (
-                    <tr key={p.id} className="hover:bg-slate-800/40">
-                      <td className="py-3 px-4 font-mono text-slate-400">{p.sku}</td>
-                      <td className="py-3 px-4 font-semibold text-slate-200">{p.nome}</td>
-                      <td className="py-3 px-4 font-mono text-emerald-400">
-                        R$ {Number(p.preco_venda).toFixed(2)}
-                      </td>
-                      <td className="py-3 px-4 font-mono font-bold text-slate-100">{p.estoque_atual}</td>
-                      <td className="py-3 px-4">
-                        {p.estoque_atual <= 0 ? (
-                          <span className="bg-red-500/10 text-red-400 px-2 py-0.5 rounded text-[10px] font-semibold border border-red-500/20">
-                            Esgotado
-                          </span>
-                        ) : p.estoque_atual <= 10 ? (
-                          <span className="bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded text-[10px] font-semibold border border-amber-500/20">
-                            Stock Baixo
-                          </span>
-                        ) : (
-                          <span className="bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded text-[10px] font-semibold border border-emerald-500/20">
-                            Em Stock
-                          </span>
-                        )}
+                  {produtos.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="text-center p-6 text-slate-500 font-medium">
+                        Nenhum produto cadastrado no banco de dados.
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    produtos.map((produto) => (
+                      <tr key={produto.id} className="hover:bg-slate-800/40 transition-colors">
+                        <td className="p-3.5 font-mono text-xs text-slate-400">{produto.sku}</td>
+                        <td className="p-3.5 font-semibold text-slate-100">{produto.nome}</td>
+                        <td className="p-3.5 text-xs font-bold">
+                          <span className={`px-2.5 py-1 rounded-full ${
+                            produto.tipo === 'PRODUTO_FINAL' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/50' :
+                            produto.tipo === 'EMBALAGEM' ? 'bg-amber-950 text-amber-400 border border-amber-800/50' :
+                            produto.tipo === 'INSUMO' ? 'bg-blue-950 text-blue-400 border border-blue-800/50' :
+                            'bg-slate-800 text-slate-300 border border-slate-700'
+                          }`}>
+                            {formatarTipo(produto.tipo)}
+                          </span>
+                        </td>
+                        <td className="p-3.5 text-right font-bold text-slate-100">
+                          {produto.estoque_atual} un
+                        </td>
+                        <td className="p-3.5 text-right text-slate-300 font-medium">
+                          R$ {produto.preco_venda ? Number(produto.preco_venda).toFixed(2) : '0.00'}
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
           )}
         </div>
+
       </div>
-    </main>
+    </div>
   );
 }

@@ -10,12 +10,12 @@ interface Produto {
   nome: string;
   preco_venda: number;
   estoque_atual: number;
+  tipo: string;
 }
 
 interface ItemCarrinho {
   produto_id: string;
   nome: string;
-  sku: string;
   quantidade: number;
   preco_unitario: number;
   subtotal: number;
@@ -23,341 +23,409 @@ interface ItemCarrinho {
 
 export default function NovaVendaPage() {
   const router = useRouter();
-  const [produtos, setProdutos] = useState<Produto[]>([]);
-  const [produtoSelId, setProdutoSelId] = useState('');
-  const [qtd, setQtd] = useState(1);
-  const [carrinho, setCarrinho] = useState<ItemCarrinho[]>([]);
-  const [cliente, setCliente] = useState('');
-  const [formaPagamento, setFormaPagamento] = useState('PIX');
-  const [observacao, setObservacao] = useState('');
-  const [salvando, setSalvando] = useState(false);
 
+  const [produtos, setProdutos] = useState<Produto[]>([]);
+  const [produtoSelecionadoId, setProdutoSelecionadoId] = useState<string>('');
+  const [quantidade, setQuantidade] = useState<number>(1);
+  const [carrinho, setCarrinho] = useState<ItemCarrinho[]>([]);
+
+  // Estados de Carregamento
+  const [carregandoProdutos, setCarregandoProdutos] = useState<boolean>(true);
+  const [erroCarregamento, setErroCarregamento] = useState<string | null>(null);
+
+  // Dados da Venda
+  const [clienteNome, setClienteNome] = useState<string>('Cliente Avulso');
+  const [formaPagamento, setFormaPagamento] = useState<string>('PIX');
+  const [desconto, setDesconto] = useState<number>(0);
+  const [observacao, setObservacao] = useState<string>('');
+  const [carregandoVenda, setCarregandoVenda] = useState<boolean>(false);
+
+  // Carrega produtos ordenados pelo maior estoque e filtra RIGOROSAMENTE PRODUTO_FINAL
   useEffect(() => {
+    let montado = true;
+
     async function carregarProdutos() {
-      const { data, error } = await supabase
-        .from('produtos')
-        .select('id, sku, nome, preco_venda, estoque_atual')
-        .order('nome');
-      
-      if (error) {
-        alert(`Erro ao carregar lista de produtos: ${error.message}`);
-      } else if (data) {
-        setProdutos(data);
+      try {
+        setCarregandoProdutos(true);
+        setErroCarregamento(null);
+
+        const { data, error } = await supabase
+          .from('produtos')
+          .select('id, sku, nome, preco_venda, estoque_atual, tipo')
+          .order('estoque_atual', { ascending: false });
+
+        if (error) throw error;
+
+        if (montado && data) {
+          // Filtro estrito: ignora NULLs e valida PRODUTO_FINAL / PRODUTO FINAL
+          const produtosFinais = data.filter((p) => {
+            if (!p.tipo) return false;
+            const tipoTratado = String(p.tipo).toUpperCase().replace(/_/g, ' ').trim();
+            return tipoTratado === 'PRODUTO FINAL';
+          });
+
+          setProdutos(produtosFinais);
+        }
+      } catch (err: any) {
+        console.error('Erro ao conectar com Supabase:', err);
+        if (montado) {
+          setErroCarregamento(err.message || 'Erro ao carregar lista de produtos.');
+        }
+      } finally {
+        if (montado) {
+          setCarregandoProdutos(false);
+        }
       }
     }
+
     carregarProdutos();
+
+    return () => {
+      montado = false;
+    };
   }, []);
 
   const adicionarAoCarrinho = () => {
-    if (!produtoSelId) {
-      alert('Selecione um produto para adicionar ao carrinho.');
+    if (!produtoSelecionadoId) {
+      alert('Selecione um produto.');
       return;
     }
 
-    const prod = produtos.find((p) => p.id === produtoSelId);
-    if (!prod) return;
+    const produto = produtos.find((p) => p.id === produtoSelecionadoId);
+    if (!produto) return;
 
-    if (qtd <= 0) {
+    if (quantidade <= 0) {
       alert('A quantidade deve ser maior que zero.');
       return;
     }
 
-    if (qtd > prod.estoque_atual) {
-      alert(`Stock insuficiente! Apenas ${prod.estoque_atual} unidades disponíveis do produto ${prod.nome}.`);
+    if (quantidade > produto.estoque_atual) {
+      alert(`Quantidade desejada maior que o estoque atual (${produto.estoque_atual} un).`);
       return;
     }
 
-    const itemExistente = carrinho.find((i) => i.produto_id === prod.id);
+    const itemExistente = carrinho.find((item) => item.produto_id === produto.id);
 
     if (itemExistente) {
-      const novaQtd = itemExistente.quantidade + qtd;
-      if (novaQtd > prod.estoque_atual) {
-        alert(`Stock insuficiente! Apenas ${prod.estoque_atual} unidades disponíveis.`);
+      const novaQtd = itemExistente.quantidade + quantidade;
+      if (novaQtd > produto.estoque_atual) {
+        alert(`Quantidade total no carrinho ultrapassa o estoque disponível (${produto.estoque_atual} un).`);
         return;
       }
+
       setCarrinho(
-        carrinho.map((i) =>
-          i.produto_id === prod.id
-            ? { ...i, quantidade: novaQtd, subtotal: novaQtd * i.preco_unitario }
-            : i
+        carrinho.map((item) =>
+          item.produto_id === produto.id
+            ? {
+                ...item,
+                quantidade: novaQtd,
+                subtotal: novaQtd * item.preco_unitario,
+              }
+            : item
         )
       );
     } else {
       setCarrinho([
         ...carrinho,
         {
-          produto_id: prod.id,
-          nome: prod.nome,
-          sku: prod.sku,
-          quantidade: qtd,
-          preco_unitario: Number(prod.preco_venda),
-          subtotal: qtd * Number(prod.preco_venda),
+          produto_id: produto.id,
+          nome: produto.nome,
+          quantidade: quantidade,
+          preco_unitario: produto.preco_venda,
+          subtotal: quantidade * produto.preco_venda,
         },
       ]);
     }
 
-    setProdutoSelId('');
-    setQtd(1);
+    setProdutoSelecionadoId('');
+    setQuantidade(1);
   };
 
-  const removerDoCarrinho = (index: number) => {
-    setCarrinho(carrinho.filter((_, i) => i !== index));
+  const removerDoCarrinho = (produto_id: string) => {
+    setCarrinho(carrinho.filter((item) => item.produto_id !== produto_id));
   };
 
-  const valorTotal = carrinho.reduce((acc, item) => acc + item.subtotal, 0);
+  const subtotalGeral = carrinho.reduce((acc, item) => acc + item.subtotal, 0);
+  const totalComDesconto = Math.max(0, subtotalGeral - desconto);
 
-  const finalizarVenda = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!cliente.trim()) {
-      alert('Por favor, informe o nome do cliente ou empresa antes de finalizar.');
-      return;
-    }
-
+  const finalizarVenda = async () => {
     if (carrinho.length === 0) {
-      alert('Adicione pelo menos um produto ao carrinho.');
+      alert('O carrinho está vazio.');
       return;
     }
 
-    setSalvando(true);
+    setCarregandoVenda(true);
 
     try {
-      // 1. Criar Registo da Venda na tabela 'vendas'
-      const { data: venda, error: errVenda } = await supabase
+      const { data: vendaData, error: vendaError } = await supabase
         .from('vendas')
         .insert([
           {
-            cliente_nome: cliente.trim(),
+            cliente_nome: clienteNome || 'Cliente Avulso',
             forma_pagamento: formaPagamento,
-            valor_total: valorTotal,
-            observacao: observacao.trim() || null,
+            valor_total: totalComDesconto,
+            observacao: observacao,
           },
         ])
         .select()
         .single();
 
-      if (errVenda) {
-        alert(`Erro na tabela VENDAS: ${errVenda.message} (${errVenda.details || errVenda.hint || ''})`);
-        setSalvando(false);
-        return;
-      }
+      if (vendaError) throw vendaError;
 
-      if (!venda) {
-        alert('Erro ao gerar registo de venda no banco de dados.');
-        setSalvando(false);
-        return;
-      }
-
-      // 2. Criar os itens na tabela 'itens_venda'
       const itensParaInserir = carrinho.map((item) => ({
-        venda_id: venda.id,
+        venda_id: vendaData.id,
         produto_id: item.produto_id,
         quantidade: item.quantidade,
-        preco_unitario: Number(item.preco_unitario),
-        subtotal: Number(item.subtotal),
+        preco_unitario: item.preco_unitario,
+        subtotal: item.subtotal,
       }));
 
-      const { error: errItens } = await supabase.from('itens_venda').insert(itensParaInserir);
-      if (errItens) {
-        alert(`Erro na tabela ITENS_VENDA: ${errItens.message} (${errItens.details || ''})`);
-        setSalvando(false);
-        return;
-      }
+      const { error: itensError } = await supabase
+        .from('itens_venda')
+        .insert(itensParaInserir);
 
-      // 3. Registar as baixas na tabela 'movimentacoes_estoque' (acionando o trigger do Supabase)
+      if (itensError) throw itensError;
+
       const movimentacoes = carrinho.map((item) => ({
         produto_id: item.produto_id,
         tipo: 'SAIDA',
         quantidade: item.quantidade,
-        observacao: `Venda #${venda.id.slice(0, 8)} - ${cliente.trim()}`,
+        observacao: `Venda #${vendaData.id.slice(0, 8)} - ${clienteNome}`,
       }));
 
-      const { error: errMov } = await supabase.from('movimentacoes_estoque').insert(movimentacoes);
-      if (errMov) {
-        alert(`Erro na tabela MOVIMENTACOES: ${errMov.message} (${errMov.details || ''})`);
-        setSalvando(false);
-        return;
-      }
+      const { error: movError } = await supabase
+        .from('movimentacoes_estoque')
+        .insert(movimentacoes);
+
+      if (movError) throw movError;
 
       alert('Venda realizada com sucesso!');
-      window.location.href = '/';
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Erro inesperado';
-      alert(`Erro inesperado ao finalizar venda: ${msg}`);
+      router.push('/vendas');
+    } catch (error: any) {
+      alert(`Erro ao finalizar venda: ${error.message}`);
     } finally {
-      setSalvando(false);
+      setCarregandoVenda(false);
     }
   };
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 p-8">
-      <div className="max-w-5xl mx-auto space-y-6">
-        {/* Topo / Cabeçalho */}
-        <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+    <div className="min-h-screen bg-slate-950 text-slate-100 py-8 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-4xl mx-auto space-y-6">
+        
+        {/* Cabeçalho */}
+        <div className="flex justify-between items-center bg-slate-900 p-5 rounded-xl border border-slate-800 shadow-md">
           <div>
-            <h1 className="text-2xl font-bold text-emerald-400">Registar Nova Venda</h1>
-            <p className="text-xs text-slate-400">Painel de Lançamento de Pedidos</p>
+            <h1 className="text-2xl font-bold text-white">Nova Venda</h1>
+            <p className="text-sm text-slate-400">Módulo Comercial - OrC Brasil</p>
           </div>
           <button
-            type="button"
-            onClick={() => {
-              window.location.assign('/');
-            }}
-            className="bg-slate-900 border border-slate-800 text-slate-300 hover:bg-slate-800 px-3 py-1.5 rounded-lg text-xs transition-colors cursor-pointer"
+            onClick={() => router.back()}
+            className="px-4 py-2 text-sm font-medium bg-slate-800 text-slate-200 hover:bg-slate-700 rounded-lg transition-colors border border-slate-700"
           >
-            ← Voltar ao Dashboard
+            Voltar
           </button>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Coluna Esquerda: Seleção de Produtos e Carrinho */}
-          <div className="lg:col-span-2 space-y-4 bg-slate-900 border border-slate-800 p-5 rounded-xl">
-            <h2 className="text-sm font-semibold text-slate-200 uppercase tracking-wider">
-              1. Selecionar Produtos
-            </h2>
-
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-              <div className="md:col-span-2">
-                <label className="block text-xs text-slate-400 mb-1">Produto</label>
+        {/* Painel 1: Seleção de Produtos */}
+        <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-4">
+          <h2 className="text-lg font-semibold text-slate-200 border-b border-slate-800 pb-2">
+            1. Seleção de Produtos
+          </h2>
+          
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+            <div className="md:col-span-2">
+              <label className="block text-sm font-semibold text-slate-300 mb-1">
+                Produto
+              </label>
+              {carregandoProdutos ? (
+                <div className="p-2.5 border border-slate-800 rounded-lg bg-slate-950 text-slate-500 text-sm animate-pulse">
+                  Carregando lista de produtos...
+                </div>
+              ) : erroCarregamento ? (
+                <div className="p-2.5 border border-red-500/30 bg-red-950/50 text-red-400 text-sm rounded-lg">
+                  {erroCarregamento}
+                </div>
+              ) : (
                 <select
-                  value={produtoSelId}
-                  onChange={(e) => setProdutoSelId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
+                  value={produtoSelecionadoId}
+                  onChange={(e) => setProdutoSelecionadoId(e.target.value)}
+                  className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                 >
-                  <option value="">Selecione um item...</option>
-                  {produtos.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.nome} ({p.sku}) — R$ {Number(p.preco_venda).toFixed(2)} [Stock: {p.estoque_atual}]
+                  <option value="" className="text-slate-500 bg-slate-900">Selecione um produto...</option>
+                  {produtos.map((produto) => (
+                    <option key={produto.id} value={produto.id} className="text-slate-100 bg-slate-900 font-medium py-1">
+                      {produto.nome} ({produto.estoque_atual} un em estoque)
                     </option>
                   ))}
                 </select>
-              </div>
-
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">Qtd.</label>
-                <input
-                  type="number"
-                  min="1"
-                  value={qtd}
-                  onChange={(e) => setQtd(Number(e.target.value))}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              <div className="flex items-end">
-                <button
-                  type="button"
-                  onClick={adicionarAoCarrinho}
-                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-2 rounded-lg text-xs transition-colors"
-                >
-                  + Adicionar
-                </button>
-              </div>
-            </div>
-
-            {/* Lista do Carrinho */}
-            <div className="mt-6 border-t border-slate-800 pt-4">
-              <h3 className="text-xs font-semibold text-slate-400 uppercase mb-3">Itens no Pedido</h3>
-              {carrinho.length === 0 ? (
-                <p className="text-xs text-slate-500 py-6 text-center">Nenhum item adicionado ainda.</p>
-              ) : (
-                <div className="space-y-2">
-                  {carrinho.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className="flex justify-between items-center bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs"
-                    >
-                      <div>
-                        <p className="font-semibold text-slate-200">{item.nome}</p>
-                        <p className="text-slate-500 font-mono">
-                          {item.quantidade}x R$ {item.preco_unitario.toFixed(2)}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="font-mono text-emerald-400 font-bold">
-                          R$ {item.subtotal.toFixed(2)}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => removerDoCarrinho(idx)}
-                          className="text-red-400 hover:text-red-300 font-bold px-1"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
               )}
             </div>
-          </div>
-
-          {/* Coluna Direita: Dados do Pedido e Pagamento */}
-          <form onSubmit={finalizarVenda} className="bg-slate-900 border border-slate-800 p-5 rounded-xl space-y-4">
-            <h2 className="text-sm font-semibold text-slate-200 uppercase tracking-wider">
-              2. Dados do Pedido
-            </h2>
 
             <div>
-              <label className="block text-xs text-slate-400 mb-1">
-                Nome do Cliente / Empresa <span className="text-red-400">*</span>
+              <label className="block text-sm font-semibold text-slate-300 mb-1">
+                Quantidade
+              </label>
+              <input
+                type="number"
+                min="1"
+                value={quantidade}
+                onChange={(e) => setQuantidade(Number(e.target.value))}
+                className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={adicionarAoCarrinho}
+              disabled={carregandoProdutos}
+              className="w-full bg-blue-600 hover:bg-blue-500 text-white p-2.5 rounded-lg font-semibold transition-colors shadow-sm disabled:opacity-50"
+            >
+              Adicionar
+            </button>
+          </div>
+        </div>
+
+        {/* Painel 2: Tabela do Carrinho */}
+        <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-4">
+          <h2 className="text-lg font-semibold text-slate-200 border-b border-slate-800 pb-2">
+            2. Itens Adicionados
+          </h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-800 bg-slate-950/50 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  <th className="p-3.5">Produto</th>
+                  <th className="p-3.5 text-center">Qtd</th>
+                  <th className="p-3.5 text-right">Preço Unit.</th>
+                  <th className="p-3.5 text-right">Subtotal</th>
+                  <th className="p-3.5 text-center">Ação</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60">
+                {carrinho.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="text-center p-6 text-slate-500 font-medium">
+                      Nenhum produto adicionado ao pedido.
+                    </td>
+                  </tr>
+                ) : (
+                  carrinho.map((item) => (
+                    <tr key={item.produto_id} className="hover:bg-slate-800/40 transition-colors">
+                      <td className="p-3.5 font-semibold text-slate-100">{item.nome}</td>
+                      <td className="p-3.5 text-center text-slate-200 font-medium">{item.quantidade}</td>
+                      <td className="p-3.5 text-right text-slate-300">
+                        R$ {item.preco_unitario.toFixed(2)}
+                      </td>
+                      <td className="p-3.5 text-right font-bold text-white">
+                        R$ {item.subtotal.toFixed(2)}
+                      </td>
+                      <td className="p-3.5 text-center">
+                        <button
+                          onClick={() => removerDoCarrinho(item.produto_id)}
+                          className="text-red-400 hover:text-red-300 text-sm font-semibold hover:underline"
+                        >
+                          Remover
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Painel 3: Pagamento e Finalização */}
+        <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-6">
+          <h2 className="text-lg font-semibold text-slate-200 border-b border-slate-800 pb-2">
+            3. Pagamento e Finalização
+          </h2>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-semibold text-slate-300 mb-1">
+                Nome do Cliente
               </label>
               <input
                 type="text"
-                placeholder="Ex: Distribuidora Silva, Tabacaria Central..."
-                value={cliente}
-                onChange={(e) => setCliente(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
-                required
+                value={clienteNome}
+                onChange={(e) => setClienteNome(e.target.value)}
+                className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+                placeholder="Ex: João da Silva"
               />
             </div>
 
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Forma de Pagamento</label>
+              <label className="block text-sm font-semibold text-slate-300 mb-1">
+                Forma de Pagamento
+              </label>
               <select
                 value={formaPagamento}
                 onChange={(e) => setFormaPagamento(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
+                className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 font-medium focus:ring-2 focus:ring-blue-500 outline-none"
               >
-                <option value="PIX">Pix</option>
-                <option value="CARTAO_CREDITO">Cartão de Crédito</option>
-                <option value="CARTAO_DEBITO">Cartão de Débito</option>
-                <option value="BOLETO">Boleto Bancário</option>
-                <option value="FATURADO">Faturado / A Prazo</option>
-                <option value="DINHEIRO">Dinheiro</option>
+                <option value="PIX" className="bg-slate-900">PIX</option>
+                <option value="DINHEIRO" className="bg-slate-900">Dinheiro</option>
+                <option value="CARTAO_CREDITO" className="bg-slate-900">Cartão de Crédito</option>
+                <option value="CARTAO_DEBITO" className="bg-slate-900">Cartão de Débito</option>
+                <option value="BOLETO" className="bg-slate-900">Boleto</option>
+                <option value="FATURADO" className="bg-slate-900">Faturado</option>
               </select>
             </div>
 
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Observações</label>
-              <textarea
-                rows={2}
-                placeholder="Observações do pedido ou prazo de entrega..."
-                value={observacao}
-                onChange={(e) => setObservacao(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
+              <label className="block text-sm font-semibold text-slate-300 mb-1">
+                Desconto (R$)
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={desconto}
+                onChange={(e) => setDesconto(Number(e.target.value))}
+                className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 font-medium focus:ring-2 focus:ring-blue-500 outline-none"
               />
             </div>
 
-            <div className="border-t border-slate-800 pt-4 space-y-3">
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-slate-400">Total a Pagar:</span>
-                <span className="text-2xl font-bold font-mono text-emerald-400">
-                  R$ {valorTotal.toFixed(2)}
-                </span>
-              </div>
-
-              <button
-                type="submit"
-                disabled={salvando || carrinho.length === 0}
-                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 rounded-lg text-sm transition-colors disabled:opacity-50"
-              >
-                {salvando ? 'A processar...' : '✓ Finalizar Venda'}
-              </button>
+            <div>
+              <label className="block text-sm font-semibold text-slate-300 mb-1">
+                Observações
+              </label>
+              <input
+                type="text"
+                value={observacao}
+                onChange={(e) => setObservacao(e.target.value)}
+                className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+                placeholder="Observações do pedido..."
+              />
             </div>
-          </form>
+          </div>
+
+          {/* Resumo Financeiro */}
+          <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 space-y-1 text-right">
+            <div className="text-sm font-medium text-slate-400">
+              Subtotal: <span className="font-semibold text-slate-200">R$ {subtotalGeral.toFixed(2)}</span>
+            </div>
+            {desconto > 0 && (
+              <div className="text-sm font-medium text-red-400">
+                Desconto: <span>- R$ {desconto.toFixed(2)}</span>
+              </div>
+            )}
+            <div className="text-2xl font-extrabold text-white pt-1">
+              Total Final: R$ {totalComDesconto.toFixed(2)}
+            </div>
+          </div>
+
+          <button
+            onClick={finalizarVenda}
+            disabled={carregandoVenda || carrinho.length === 0}
+            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3.5 rounded-lg font-bold text-lg transition-colors shadow-sm disabled:opacity-50"
+          >
+            {carregandoVenda ? 'Finalizando Venda...' : 'Concluir Venda'}
+          </button>
         </div>
+
       </div>
-    </main>
+    </div>
   );
 }
