@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
+import ModalMovimentacao from './ModalMovimentacao';
 
 interface Produto {
   id: string;
@@ -18,13 +20,14 @@ interface Props {
 }
 
 export default function TabelaProdutos({ produtos }: Props) {
+  const router = useRouter();
   const [busca, setBusca] = useState('');
   const [filtroStatus, setFiltroStatus] = useState<'todos' | 'normal' | 'alerta'>('todos');
   const [categoriaSel, setCategoriaSel] = useState<string>('todos');
   const [paginaAtual, setPaginaAtual] = useState(1);
+  const [produtoMovimentar, setProdutoMovimentar] = useState<Produto | null>(null);
   const itensPorPagina = 10;
 
-  // Filtragem combinada (Busca + Status + Categoria)
   const produtosFiltrados = useMemo(() => {
     return produtos.filter((item) => {
       const emAlerta = item.estoque_atual <= item.estoque_minimo;
@@ -35,11 +38,7 @@ export default function TabelaProdutos({ produtos }: Props) {
         item.sku.toLowerCase().includes(busca.toLowerCase());
 
       if (!bateBusca) return false;
-
-      // Filtro de Categoria
       if (categoriaSel !== 'todos' && catItem !== categoriaSel) return false;
-
-      // Filtro de Status
       if (filtroStatus === 'alerta') return emAlerta;
       if (filtroStatus === 'normal') return !emAlerta;
 
@@ -47,7 +46,6 @@ export default function TabelaProdutos({ produtos }: Props) {
     });
   }, [produtos, busca, filtroStatus, categoriaSel]);
 
-  // Paginação
   const totalPaginas = Math.ceil(produtosFiltrados.length / itensPorPagina) || 1;
   const produtosPaginados = useMemo(() => {
     const inicio = (paginaAtual - 1) * itensPorPagina;
@@ -153,13 +151,14 @@ export default function TabelaProdutos({ produtos }: Props) {
               <th className="py-3 px-4">Preço Venda</th>
               <th className="py-3 px-4">Estoque</th>
               <th className="py-3 px-4">Status</th>
+              <th className="py-3 px-4 text-right">Ação</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800">
             {produtosPaginados.length === 0 ? (
               <tr>
-                <td colSpan={6} className="text-center py-6 text-slate-500">
-                  Nenhum item encontrado nesta categoria.
+                <td colSpan={7} className="text-center py-6 text-slate-500">
+                  Nenhum item encontrado.
                 </td>
               </tr>
             ) : (
@@ -190,6 +189,14 @@ export default function TabelaProdutos({ produtos }: Props) {
                         </span>
                       )}
                     </td>
+                    <td className="py-3 px-4 text-right">
+                      <button
+                        onClick={() => setProdutoMovimentar(item)}
+                        className="bg-slate-800 hover:bg-emerald-600/20 hover:text-emerald-400 hover:border-emerald-500/30 text-slate-300 border border-slate-700 px-2.5 py-1 rounded text-xs transition-all"
+                      >
+                        ± Movimentar
+                      </button>
+                    </td>
                   </tr>
                 );
               })
@@ -198,7 +205,7 @@ export default function TabelaProdutos({ produtos }: Props) {
         </table>
       </div>
 
-      {/* Rodapé de Paginação */}
+      {/* Controles de Paginação */}
       <div className="flex justify-between items-center pt-2 text-xs text-slate-400">
         <span>
           Página {paginaAtual} de {totalPaginas} ({produtosFiltrados.length} itens exibidos)
@@ -220,6 +227,13 @@ export default function TabelaProdutos({ produtos }: Props) {
           </button>
         </div>
       </div>
+
+      {/* Modal de Movimentação de Estoque */}
+      <ModalMovimentacao
+        produto={produtoMovimentar}
+        onClose={() => setProdutoMovimentar(null)}
+        onSuccess={() => router.refresh()}
+      />
     </div>
   );
 }
