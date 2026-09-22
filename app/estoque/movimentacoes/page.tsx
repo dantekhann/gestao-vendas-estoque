@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 
 interface Produto {
   id: string;
+  nome: string;
   estoque_atual: number;
 }
 
@@ -16,9 +17,7 @@ interface Movimentacao {
   quantidade: number;
   observacao?: string;
   created_at?: string;
-  produtos?: Produto & {
-    nome: string;
-  };
+  produtos?: Produto | Produto[] | null;
   produto_nome?: string;
 }
 

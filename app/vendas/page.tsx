@@ -6,13 +6,15 @@ import { supabase } from '@/lib/supabase';
 
 interface ItemVenda {
   id: string;
-  produto_id: string;
+  produto_id?: string;
   quantidade: number;
   preco_unitario: number;
   subtotal: number;
   produtos?: {
     nome: string;
-  };
+  } | {
+    nome: string;
+  }[] | null;
 }
 
 interface Venda {
@@ -102,11 +104,12 @@ export default function HistoricoVendasPage() {
 
       if (venda.itens_venda && venda.itens_venda.length > 0) {
         for (const item of venda.itens_venda) {
-          if (item.produto_id) {
+          const prodId = item.produto_id;
+          if (prodId) {
             const { data: prodData } = await supabase
               .from('produtos')
               .select('estoque_atual')
-              .eq('id', item.produto_id)
+              .eq('id', prodId)
               .single();
 
             if (prodData) {
@@ -114,7 +117,7 @@ export default function HistoricoVendasPage() {
               await supabase
                 .from('produtos')
                 .update({ estoque_atual: novoEstoque })
-                .eq('id', item.produto_id);
+                .eq('id', prodId);
             }
           }
         }
