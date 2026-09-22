@@ -1,128 +1,125 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
 interface Produto {
   id: string;
-  sku: string;
   nome: string;
   estoque_atual: number;
-  tipo: string;
 }
 
 export default function MovimentarEstoquePage() {
   const router = useRouter();
-
   const [produtos, setProdutos] = useState<Produto[]>([]);
-  const [carregandoProdutos, setCarregandoProdutos] = useState<boolean>(true);
+  const [carregando, setCarregando] = useState<boolean>(true);
+  const [salvando, setSalvando] = useState<boolean>(false);
   const [erro, setErro] = useState<string | null>(null);
 
-  // Formulário de Lançamento
-  const [produtoId, setProdutoId] = useState<string>('');
-  const [tipoMovimentacao, setTipoMovimentacao] = useState<'ENTRADA' | 'SAIDA' | 'AJUSTE'>('ENTRADA');
-  const [quantidade, setQuantidade] = useState<number>(1);
+  // Estados do formulário
+  const [produtoSelecionado, setProdutoSelecionado] = useState<Produto | null>(null);
+  const [termoBusca, setTermoBusca] = useState<string>('');
+  const [mostrarDropdown, setMostrarDropdown] = useState<boolean>(false);
   
-  // Data da ação (preenchida com a data de hoje por padrão, sem hora)
-  const [dataMovimentacao, setDataMovimentacao] = useState<string>(
-    new Date().toISOString().split('T')[0]
-  );
-
+  const [tipo, setTipo] = useState<'ENTRADA' | 'SAIDA' | 'AJUSTE'>('ENTRADA');
+  const [quantidade, setQuantidade] = useState<string>('1');
   const [observacao, setObservacao] = useState<string>('');
-  const [salvando, setSalvando] = useState<boolean>(false);
 
-  // Carrega todos os itens
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     async function carregarProdutos() {
       try {
-        setCarregandoProdutos(true);
-        setErro(null);
-
+        setCarregando(true);
         const { data, error } = await supabase
           .from('produtos')
-          .select('id, sku, nome, estoque_atual, tipo')
+          .select('id, nome, estoque_atual')
           .order('nome', { ascending: true });
 
         if (error) throw error;
         if (data) setProdutos(data);
       } catch (err: any) {
-        console.error('Erro ao buscar produtos:', err);
-        setErro(err.message || 'Erro ao carregar lista de itens.');
+        setErro(err?.message || 'Erro ao carregar produtos.');
       } finally {
-        setCarregandoProdutos(false);
+        setCarregando(false);
       }
     }
-
     carregarProdutos();
+
+    // Fecha o menu suspenso se clicar fora
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setMostrarDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const produtoSelecionado = produtos.find((p) => p.id === produtoId);
+  // Filtrar produtos com base no que é digitado
+  const produtosFiltrados = produtos.filter((p) =>
+    p.nome.toLowerCase().includes(termoBusca.toLowerCase().trim())
+  );
 
-  const formatarTipo = (tipo: string) => {
-    if (!tipo) return '';
-    return tipo.replace(/_/g, ' ');
-  };
-
-  const handleSalvarMovimentacao = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    if (!produtoId) {
-      alert('Selecione um item/produto.');
+    if (!produtoSelecionado) {
+      alert('Por favor, selecione um produto da lista.');
       return;
     }
 
-    if (quantidade <= 0 && tipoMovimentacao !== 'AJUSTE') {
-      alert('A quantidade deve ser maior que zero.');
+    const qtdNum = parseInt(quantidade, 10);
+    if (isNaN(qtdNum) || qtdNum <= 0) {
+      alert('Insira uma quantidade válida.');
       return;
     }
-
-    if (!dataMovimentacao) {
-      alert('Informe a data da movimentação.');
-      return;
-    }
-
-    setSalvando(true);
 
     try {
-      // Formata a observação incluindo a data escolhida para que fique visível no histórico
-      const obsFinal = `[Data: ${dataMovimentacao}] ${
-        observacao || `Lançamento manual de ${tipoMovimentacao.toLowerCase()}`
-      }`;
+      setSalvando(true);
+      setErro(null);
 
-      // 1. Registra a movimentação no histórico usando a coluna existente 'observacao'
-      const { error: errorMov } = await supabase
-        .from('movimentacoes_estoque')
-        .insert([
-          {
-            produto_id: produtoId,
-            tipo: tipoMovimentacao,
-            quantidade: quantidade,
-            observacao: obsFinal,
-          },
-        ]);
+      // Data atual formatada para auditoria
+      const hoje = new Date().toISOString().split('T')[0];
+      const obsFormatada = `[Data: ${hoje}] ${observacao}`.trim();
 
-      if (errorMov) throw errorMov;
+      // 1. Registrar a movimentação na tabela
+      const { error: movError } = await supabase.from('movimentacoes_estoque').insert([
+        {
+          produto_id: produtoSelecionado.id,
+          tipo,
+          quantidade: qtdNum,
+          observacao: obsFormatada,
+        },
+      ]);
 
-      // 2. Atualiza o estoque diretamente na tabela produtos
-      let novoEstoque = produtoSelecionado?.estoque_atual || 0;
-      if (tipoMovimentacao === 'ENTRADA') novoEstoque += quantidade;
-      if (tipoMovimentacao === 'SAIDA') novoEstoque -= quantidade;
-      if (tipoMovimentacao === 'AJUSTE') novoEstoque = quantidade;
+      if (movError) throw movError;
 
-      const { error: errorProd } = await supabase
+      // 2. Calcular novo estoque
+      let novoEstoque = produtoSelecionado.estoque_atual;
+      if (tipo === 'ENTRADA') {
+        novoEstoque += qtdNum;
+      } else if (tipo === 'SAIDA') {
+        novoEstoque -= qtdNum;
+      } else if (tipo === 'AJUSTE') {
+        novoEstoque = qtdNum;
+      }
+
+      // 3. Atualizar estoque na tabela de produtos
+      const { error: prodError } = await supabase
         .from('produtos')
-        .update({ estoque_atual: novoEstoque })
-        .eq('id', produtoId);
+        .update({ estoque_atual: Math.max(0, novoEstoque) })
+        .eq('id', produtoSelecionado.id);
 
-      if (errorProd) throw errorProd;
+      if (prodError) throw prodError;
 
-      alert('Movimentação realizada com sucesso!');
-      router.push('/');
+      alert('Movimentação registrada e estoque atualizado com sucesso!');
+      router.push('/estoque/movimentacoes');
       router.refresh();
     } catch (err: any) {
-      console.error('Erro ao registrar movimentação:', err);
-      alert(`Erro: ${err.message}`);
+      console.error(err);
+      setErro(err?.message || 'Erro ao salvar movimentação.');
     } finally {
       setSalvando(false);
     }
@@ -136,162 +133,157 @@ export default function MovimentarEstoquePage() {
         <div className="flex justify-between items-center bg-slate-900 p-5 rounded-xl border border-slate-800 shadow-md">
           <div>
             <h1 className="text-2xl font-bold text-white">Lançar Movimentação</h1>
-            <p className="text-sm text-slate-400">Entradas, saídas e ajustes manuais de estoque</p>
+            <p className="text-sm text-slate-400">Entrada, Saída ou Ajuste Manual de Estoque - OrC Brasil</p>
           </div>
-          <button
-            onClick={() => router.back()}
+          <Link
+            href="/estoque/movimentacoes"
             className="px-4 py-2 text-sm font-medium bg-slate-800 text-slate-200 hover:bg-slate-700 rounded-lg transition-colors border border-slate-700"
           >
-            Voltar
-          </button>
+            ← Voltar
+          </Link>
         </div>
 
-        {/* Formulário em Dark Mode */}
-        <form onSubmit={handleSalvarMovimentacao} className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-5">
+        {/* Formulário */}
+        <form onSubmit={handleSubmit} className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-5">
           
-          {/* Seleção do Item */}
-          <div>
-            <label className="block text-sm font-semibold text-slate-300 mb-1">
-              Selecione o Item (Produto, Embalagem, Insumo, etc.)
-            </label>
-            {carregandoProdutos ? (
-              <div className="p-2.5 border border-slate-800 rounded-lg bg-slate-950 text-slate-500 text-sm animate-pulse">
-                Carregando lista de itens...
-              </div>
-            ) : erro ? (
-              <div className="p-2.5 border border-red-500/30 bg-red-950/50 text-red-400 text-sm rounded-lg">
-                {erro}
-              </div>
-            ) : (
-              <select
-                value={produtoId}
-                onChange={(e) => setProdutoId(e.target.value)}
-                className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 font-medium focus:ring-2 focus:ring-blue-500 outline-none"
-                required
-              >
-                <option value="" className="text-slate-500 bg-slate-900">Selecione um item...</option>
-                {produtos.map((p) => (
-                  <option key={p.id} value={p.id} className="bg-slate-900 text-slate-100 py-1">
-                    [{formatarTipo(p.tipo)}] {p.nome} — Atual: {p.estoque_atual} un
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-
-          {/* Resumo do Produto Selecionado */}
-          {produtoSelecionado && (
-            <div className="p-3.5 bg-slate-950 rounded-lg border border-slate-800/80 text-sm flex justify-between items-center">
-              <div>
-                <span className="text-slate-400">Estoque Atual: </span>
-                <span className="font-bold text-white">{produtoSelecionado.estoque_atual} un</span>
-              </div>
-              <span className="px-2.5 py-0.5 text-xs font-bold rounded-full bg-slate-800 text-slate-300 border border-slate-700">
-                {formatarTipo(produtoSelecionado.tipo)}
-              </span>
+          {erro && (
+            <div className="p-4 border border-red-500/30 bg-red-950/50 text-red-400 rounded-lg text-sm">
+              {erro}
             </div>
           )}
 
-          {/* Tipo de Operação */}
-          <div>
-            <label className="block text-sm font-semibold text-slate-300 mb-2">
-              Tipo de Movimentação
-            </label>
-            <div className="grid grid-cols-3 gap-3">
-              <button
-                type="button"
-                onClick={() => setTipoMovimentacao('ENTRADA')}
-                className={`py-2.5 px-4 rounded-lg font-bold text-sm border transition-all ${
-                  tipoMovimentacao === 'ENTRADA'
-                    ? 'bg-emerald-950 text-emerald-400 border-emerald-600 shadow-sm'
-                    : 'bg-slate-950 text-slate-400 border-slate-800 hover:bg-slate-800/50'
-                }`}
-              >
-                + ENTRADA
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setTipoMovimentacao('SAIDA')}
-                className={`py-2.5 px-4 rounded-lg font-bold text-sm border transition-all ${
-                  tipoMovimentacao === 'SAIDA'
-                    ? 'bg-red-950 text-red-400 border-red-600 shadow-sm'
-                    : 'bg-slate-950 text-slate-400 border-slate-800 hover:bg-slate-800/50'
-                }`}
-              >
-                - SAÍDA
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setTipoMovimentacao('AJUSTE')}
-                className={`py-2.5 px-4 rounded-lg font-bold text-sm border transition-all ${
-                  tipoMovimentacao === 'AJUSTE'
-                    ? 'bg-amber-950 text-amber-400 border-amber-600 shadow-sm'
-                    : 'bg-slate-950 text-slate-400 border-slate-800 hover:bg-slate-800/50'
-                }`}
-              >
-                = AJUSTE (Balanço)
-              </button>
-            </div>
-          </div>
-
-          {/* Linha com Quantidade e Data da Ação */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-slate-300 mb-1">
-                {tipoMovimentacao === 'AJUSTE' ? 'Nova Quantidade Exata' : 'Quantidade a Movimentar'}
-              </label>
-              <input
-                type="number"
-                min="0"
-                value={quantidade}
-                onChange={(e) => setQuantidade(Number(e.target.value))}
-                className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 font-medium focus:ring-2 focus:ring-blue-500 outline-none"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-slate-300 mb-1">
-                Data da Ação
-              </label>
-              <input
-                type="date"
-                value={dataMovimentacao}
-                onChange={(e) => setDataMovimentacao(e.target.value)}
-                className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 font-medium focus:ring-2 focus:ring-blue-500 outline-none"
-                required
-              />
-            </div>
-          </div>
-
-          {/* Observação / Nota / Fornecedor */}
-          <div>
-            <label className="block text-sm font-semibold text-slate-300 mb-1">
-              Observação / Motivo (Opcional)
-            </label>
+          {/* Campo de Busca por Texto do Produto */}
+          <div className="relative" ref={dropdownRef}>
+            <label className="block text-xs font-medium text-slate-400 mb-1">Buscar e Selecionar Item</label>
             <input
               type="text"
-              value={observacao}
-              onChange={(e) => setObservacao(e.target.value)}
-              placeholder="Ex: Chegada de lote de embalagens, Nota Fiscal #1234, descarte, etc."
-              className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+              placeholder="Digite para buscar (ex: Yerba, Caixa, Álcool...)"
+              value={termoBusca}
+              onChange={(e) => {
+                setTermoBusca(e.target.value);
+                setMostrarDropdown(true);
+                if (produtoSelecionado && e.target.value !== produtoSelecionado.nome) {
+                  setProdutoSelecionado(null);
+                }
+              }}
+              onFocus={() => setMostrarDropdown(true)}
+              className="w-full p-3 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+            />
+
+            {mostrarDropdown && (
+              <div className="absolute z-20 w-full mt-1 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl max-h-60 overflow-y-auto">
+                {carregando ? (
+                  <div className="p-3 text-sm text-slate-400 text-center">Carregando itens...</div>
+                ) : produtosFiltrados.length === 0 ? (
+                  <div className="p-3 text-sm text-slate-500 text-center">Nenhum item encontrado.</div>
+                ) : (
+                  produtosFiltrados.map((prod) => (
+                    <div
+                      key={prod.id}
+                      onClick={() => {
+                        setProdutoSelecionado(prod);
+                        setTermoBusca(prod.nome);
+                        setMostrarDropdown(false);
+                      }}
+                      className="p-3 text-sm hover:bg-slate-800 cursor-pointer flex justify-between items-center border-b border-slate-800/50 last:border-none"
+                    >
+                      <span className="font-medium text-slate-200">{prod.nome}</span>
+                      <span className="text-xs text-slate-400 bg-slate-950 px-2 py-1 rounded">
+                        Estoque: {prod.estoque_atual}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+
+            {produtoSelecionado ? (
+              <p className="text-xs text-emerald-400 mt-1 font-medium">
+                ✓ Selecionado: {produtoSelecionado.nome} (Estoque atual: {produtoSelecionado.estoque_atual})
+              </p>
+            ) : (
+              <p className="text-xs text-amber-400/80 mt-1">
+                * Digite no campo acima para filtrar a lista instantaneamente.
+              </p>
+            )}
+          </div>
+
+          {/* Botões de Tipo de Movimentação */}
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1">Tipo de Movimentação</label>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => setTipo('ENTRADA')}
+                className={`py-2.5 px-3 text-xs sm:text-sm font-semibold rounded-lg transition-colors border ${
+                  tipo === 'ENTRADA'
+                    ? 'bg-emerald-600 border-emerald-500 text-white shadow-md'
+                    : 'bg-slate-950 border-slate-700 text-slate-300 hover:bg-slate-800'
+                }`}
+              >
+                Entrada
+              </button>
+              <button
+                type="button"
+                onClick={() => setTipo('SAIDA')}
+                className={`py-2.5 px-3 text-xs sm:text-sm font-semibold rounded-lg transition-colors border ${
+                  tipo === 'SAIDA'
+                    ? 'bg-rose-600 border-rose-500 text-white shadow-md'
+                    : 'bg-slate-950 border-slate-700 text-slate-300 hover:bg-slate-800'
+                }`}
+              >
+                Saída
+              </button>
+              <button
+                type="button"
+                onClick={() => setTipo('AJUSTE')}
+                className={`py-2.5 px-3 text-xs sm:text-sm font-semibold rounded-lg transition-colors border ${
+                  tipo === 'AJUSTE'
+                    ? 'bg-amber-600 border-amber-500 text-white shadow-md'
+                    : 'bg-slate-950 border-slate-700 text-slate-300 hover:bg-slate-800'
+                }`}
+              >
+                Ajuste Manual
+              </button>
+            </div>
+          </div>
+
+          {/* Quantidade */}
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1">
+              {tipo === 'AJUSTE' ? 'Novo Valor Total de Estoque' : 'Quantidade'}
+            </label>
+            <input
+              type="number"
+              min="1"
+              value={quantidade}
+              onChange={(e) => setQuantidade(e.target.value)}
+              required
+              className="w-full p-3 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
 
-          {/* Botão de Envio */}
+          {/* Observação */}
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1">Observação (Opcional)</label>
+            <textarea
+              rows={3}
+              placeholder="Ex: Reposição de lote, contagem física, acerto de inventário..."
+              value={observacao}
+              onChange={(e) => setObservacao(e.target.value)}
+              className="w-full p-3 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+            />
+          </div>
+
+          {/* Botão Submeter */}
           <button
             type="submit"
-            disabled={salvando || carregandoProdutos}
-            className={`w-full py-3.5 rounded-lg font-bold text-base transition-colors shadow-sm disabled:opacity-50 ${
-              tipoMovimentacao === 'ENTRADA' ? 'bg-emerald-600 hover:bg-emerald-500 text-white' :
-              tipoMovimentacao === 'SAIDA' ? 'bg-red-600 hover:bg-red-500 text-white' :
-              'bg-amber-600 hover:bg-amber-500 text-white'
-            }`}
+            disabled={salvando || !produtoSelecionado}
+            className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg transition-colors shadow-sm disabled:opacity-50 cursor-pointer"
           >
-            {salvando ? 'Gravando no banco...' : 'Confirmar Movimentação'}
+            {salvando ? 'Registrando movimentação...' : 'Confirmar e Atualizar Estoque'}
           </button>
+
         </form>
 
       </div>
