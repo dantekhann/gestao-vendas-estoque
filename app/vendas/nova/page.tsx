@@ -29,9 +29,14 @@ interface ItemCarrinho {
 export default function NovaVendaPage() {
   const router = useRouter();
 
-  // Estados de Clientes
+  // Estados de Clientes (mantido original)
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [clienteNome, setClienteNome] = useState<string>('Cliente Avulso');
+
+  // Data da Venda (posicionada junto ao fechamento)
+  const [dataVenda, setDataVenda] = useState<string>(
+    new Date().toISOString().split('T')[0]
+  );
 
   // Estados de Produtos e Carrinho
   const [produtos, setProdutos] = useState<Produto[]>([]);
@@ -51,7 +56,6 @@ export default function NovaVendaPage() {
   const [observacao, setObservacao] = useState<string>('');
   const [carregandoVenda, setCarregandoVenda] = useState<boolean>(false);
 
-  // Carrega clientes e produtos ao inicializar
   useEffect(() => {
     let montado = true;
 
@@ -78,10 +82,7 @@ export default function NovaVendaPage() {
         if (errorProdutos) throw errorProdutos;
 
         if (montado) {
-          if (dataClientes) {
-            setClientes(dataClientes);
-          }
-
+          if (dataClientes) setClientes(dataClientes);
           if (dataProdutos) {
             const produtosFinais = dataProdutos.filter((p) => {
               if (!p.tipo) return false;
@@ -92,10 +93,7 @@ export default function NovaVendaPage() {
           }
         }
       } catch (err: any) {
-        console.error('Erro ao conectar com Supabase:', err);
-        if (montado) {
-          setErroCarregamento(err.message || 'Erro ao carregar dados.');
-        }
+        if (montado) setErroCarregamento(err.message || 'Erro ao carregar dados.');
       } finally {
         if (montado) {
           setCarregandoClientes(false);
@@ -105,21 +103,14 @@ export default function NovaVendaPage() {
     }
 
     carregarDados();
-
-    return () => {
-      montado = false;
-    };
+    return () => { montado = false; };
   }, []);
 
-  // Atualiza o preço unitário ao selecionar um produto
   const handleSelecionarProduto = (id: string) => {
     setProdutoSelecionadoId(id);
     const prod = produtos.find((p) => p.id === id);
-    if (prod) {
-      setPrecoUnitarioInput(prod.preco_venda);
-    } else {
-      setPrecoUnitarioInput(0);
-    }
+    if (prod) setPrecoUnitarioInput(prod.preco_venda);
+    else setPrecoUnitarioInput(0);
   };
 
   const adicionarAoCarrinho = () => {
@@ -154,12 +145,7 @@ export default function NovaVendaPage() {
       setCarrinho(
         carrinho.map((item) =>
           item.produto_id === produto.id
-            ? {
-                ...item,
-                quantidade: novaQtd,
-                preco_unitario: precoEfetivo,
-                subtotal: novaQtd * precoEfetivo,
-              }
+            ? { ...item, quantidade: novaQtd, preco_unitario: precoEfetivo, subtotal: novaQtd * precoEfetivo }
             : item
         )
       );
@@ -186,11 +172,7 @@ export default function NovaVendaPage() {
     setCarrinho(
       carrinho.map((item) =>
         item.produto_id === produto_id
-          ? {
-              ...item,
-              preco_unitario: precoValido,
-              subtotal: item.quantidade * precoValido,
-            }
+          ? { ...item, preco_unitario: precoValido, subtotal: item.quantidade * precoValido }
           : item
       )
     );
@@ -208,11 +190,7 @@ export default function NovaVendaPage() {
     setCarrinho(
       carrinho.map((item) =>
         item.produto_id === produto_id
-          ? {
-              ...item,
-              quantidade: qtdValida,
-              subtotal: qtdValida * item.preco_unitario,
-            }
+          ? { ...item, quantidade: qtdValida, subtotal: qtdValida * item.preco_unitario }
           : item
       )
     );
@@ -231,9 +209,17 @@ export default function NovaVendaPage() {
       return;
     }
 
+    if (!dataVenda) {
+      alert('Informe a data da venda.');
+      return;
+    }
+
     setCarregandoVenda(true);
 
     try {
+      const obsFinal = `[Data: ${dataVenda}] ${observacao || 'Venda comercial'}`;
+
+      // 1. Insere a venda
       const { data: vendaData, error: vendaError } = await supabase
         .from('vendas')
         .insert([
@@ -241,7 +227,7 @@ export default function NovaVendaPage() {
             cliente_nome: clienteNome || 'Cliente Avulso',
             forma_pagamento: formaPagamento,
             valor_total: totalComDesconto,
-            observacao: observacao,
+            observacao: obsFinal,
           },
         ])
         .select()
@@ -249,6 +235,7 @@ export default function NovaVendaPage() {
 
       if (vendaError) throw vendaError;
 
+      // 2. Insere os itens da venda
       const itensParaInserir = carrinho.map((item) => ({
         venda_id: vendaData.id,
         produto_id: item.produto_id,
@@ -263,11 +250,12 @@ export default function NovaVendaPage() {
 
       if (itensError) throw itensError;
 
+      // 3. Registra a saída no estoque com a mesma data
       const movimentacoes = carrinho.map((item) => ({
         produto_id: item.produto_id,
         tipo: 'SAIDA',
         quantidade: item.quantidade,
-        observacao: `Venda #${vendaData.id.slice(0, 8)} - ${clienteNome}`,
+        observacao: `[Data: ${dataVenda}] Venda #${vendaData.id.slice(0, 8)} - ${clienteNome}`,
       }));
 
       const { error: movError } = await supabase
@@ -303,7 +291,7 @@ export default function NovaVendaPage() {
           </button>
         </div>
 
-        {/* Painel 1: Seleção do Cliente */}
+        {/* Painel 1: Identificação do Cliente (Original Mantido) */}
         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-4">
           <h2 className="text-lg font-semibold text-slate-200 border-b border-slate-800 pb-2 text-center sm:text-left">
             1. Identificação do Cliente
@@ -481,13 +469,13 @@ export default function NovaVendaPage() {
           </div>
         </div>
 
-        {/* Painel 4: Pagamento e Fechamento */}
+        {/* Painel 4: Pagamento, Data e Fechamento */}
         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-6">
           <h2 className="text-lg font-semibold text-slate-200 border-b border-slate-800 pb-2">
             4. Pagamento e Fechamento
           </h2>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-semibold text-slate-300 mb-1">
                 Forma de Pagamento
@@ -520,7 +508,21 @@ export default function NovaVendaPage() {
               />
             </div>
 
-            <div className="md:col-span-2">
+            {/* Campo de Data posicionado junto ao pagamento */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-300 mb-1">
+                Data da Venda
+              </label>
+              <input
+                type="date"
+                value={dataVenda}
+                onChange={(e) => setDataVenda(e.target.value)}
+                className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+                required
+              />
+            </div>
+
+            <div className="md:col-span-3">
               <label className="block text-sm font-semibold text-slate-300 mb-1">
                 Observações
               </label>
