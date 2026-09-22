@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useState, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
-import ModalMovimentacao from './ModalMovimentacao';
+import { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
+import ModalMovimentacao from "./ModalMovimentacao";
 
 interface Produto {
   id: string;
@@ -21,32 +21,37 @@ interface Props {
 
 export default function TabelaProdutos({ produtos }: Props) {
   const router = useRouter();
-  const [busca, setBusca] = useState('');
-  const [filtroStatus, setFiltroStatus] = useState<'todos' | 'normal' | 'alerta'>('todos');
-  const [categoriaSel, setCategoriaSel] = useState<string>('todos');
+  const [busca, setBusca] = useState("");
+  const [filtroStatus, setFiltroStatus] = useState<
+    "todos" | "normal" | "alerta"
+  >("todos");
+  const [categoriaSel, setCategoriaSel] = useState<string>("todos");
   const [paginaAtual, setPaginaAtual] = useState(1);
-  const [produtoMovimentar, setProdutoMovimentar] = useState<Produto | null>(null);
+  const [produtoMovimentar, setProdutoMovimentar] = useState<Produto | null>(
+    null,
+  );
   const itensPorPagina = 10;
 
   const produtosFiltrados = useMemo(() => {
     return produtos.filter((item) => {
       const emAlerta = item.estoque_atual <= item.estoque_minimo;
-      const catItem = item.categoria || 'ACABADO';
-      
-      const bateBusca = 
+      const catItem = item.categoria || "ACABADO";
+
+      const bateBusca =
         item.nome.toLowerCase().includes(busca.toLowerCase()) ||
         item.sku.toLowerCase().includes(busca.toLowerCase());
 
       if (!bateBusca) return false;
-      if (categoriaSel !== 'todos' && catItem !== categoriaSel) return false;
-      if (filtroStatus === 'alerta') return emAlerta;
-      if (filtroStatus === 'normal') return !emAlerta;
+      if (categoriaSel !== "todos" && catItem !== categoriaSel) return false;
+      if (filtroStatus === "alerta") return emAlerta;
+      if (filtroStatus === "normal") return !emAlerta;
 
       return true;
     });
   }, [produtos, busca, filtroStatus, categoriaSel]);
 
-  const totalPaginas = Math.ceil(produtosFiltrados.length / itensPorPagina) || 1;
+  const totalPaginas =
+    Math.ceil(produtosFiltrados.length / itensPorPagina) || 1;
   const produtosPaginados = useMemo(() => {
     const inicio = (paginaAtual - 1) * itensPorPagina;
     return produtosFiltrados.slice(inicio, inicio + itensPorPagina);
@@ -54,11 +59,16 @@ export default function TabelaProdutos({ produtos }: Props) {
 
   const formatarCategoria = (cat?: string) => {
     switch (cat) {
-      case 'MATERIA_PRIMA': return 'Matéria-Prima';
-      case 'EMBALAGEM': return 'Embalagem';
-      case 'EPI': return 'EPI';
-      case 'CONSUMO_INTERNO': return 'Limpeza/Consumo';
-      default: return 'Produto Final';
+      case "MATERIA_PRIMA":
+        return "Matéria-Prima";
+      case "EMBALAGEM":
+        return "Embalagem";
+      case "EPI":
+        return "EPI";
+      case "CONSUMO_INTERNO":
+        return "Limpeza/Consumo";
+      default:
+        return "Produto Final";
     }
   };
 
@@ -67,12 +77,12 @@ export default function TabelaProdutos({ produtos }: Props) {
       {/* Abas de Navegação por Categoria */}
       <div className="flex border-b border-slate-800 gap-1 overflow-x-auto pb-2 text-xs font-medium text-slate-400">
         {[
-          { id: 'todos', label: 'Todos os Itens' },
-          { id: 'ACABADO', label: 'Produtos para Venda' },
-          { id: 'EMBALAGEM', label: 'Embalagens' },
-          { id: 'MATERIA_PRIMA', label: 'Matérias-Primas' },
-          { id: 'EPI', label: 'EPIs' },
-          { id: 'CONSUMO_INTERNO', label: 'Almoxarifado / Limpeza' },
+          { id: "todos", label: "Todos os Itens" },
+          { id: "ACABADO", label: "Produtos para Venda" },
+          { id: "EMBALAGEM", label: "Embalagens" },
+          { id: "MATERIA_PRIMA", label: "Matérias-Primas" },
+          { id: "EPI", label: "EPIs" },
+          { id: "CONSUMO_INTERNO", label: "Almoxarifado / Limpeza" },
         ].map((cat) => (
           <button
             key={cat.id}
@@ -82,8 +92,8 @@ export default function TabelaProdutos({ produtos }: Props) {
             }}
             className={`px-3 py-2 rounded-t-lg transition-colors border-b-2 whitespace-nowrap ${
               categoriaSel === cat.id
-                ? 'border-emerald-500 text-emerald-400 bg-slate-800/40'
-                : 'border-transparent hover:text-slate-200 hover:bg-slate-800/20'
+                ? "border-emerald-500 text-emerald-400 bg-slate-800/40"
+                : "border-transparent hover:text-slate-200 hover:bg-slate-800/20"
             }`}
           >
             {cat.label}
@@ -106,33 +116,42 @@ export default function TabelaProdutos({ produtos }: Props) {
 
         <div className="flex gap-2 w-full md:w-auto">
           <button
-            onClick={() => { setFiltroStatus('todos'); setPaginaAtual(1); }}
+            onClick={() => {
+              setFiltroStatus("todos");
+              setPaginaAtual(1);
+            }}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              filtroStatus === 'todos' 
-                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
-                : 'bg-slate-950 text-slate-400 border border-slate-800 hover:bg-slate-800'
+              filtroStatus === "todos"
+                ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                : "bg-slate-950 text-slate-400 border border-slate-800 hover:bg-slate-800"
             }`}
           >
             Todos
           </button>
-          
+
           <button
-            onClick={() => { setFiltroStatus('alerta'); setPaginaAtual(1); }}
+            onClick={() => {
+              setFiltroStatus("alerta");
+              setPaginaAtual(1);
+            }}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              filtroStatus === 'alerta' 
-                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' 
-                : 'bg-slate-950 text-slate-400 border border-slate-800 hover:bg-slate-800'
+              filtroStatus === "alerta"
+                ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                : "bg-slate-950 text-slate-400 border border-slate-800 hover:bg-slate-800"
             }`}
           >
             Alerta
           </button>
 
           <button
-            onClick={() => { setFiltroStatus('normal'); setPaginaAtual(1); }}
+            onClick={() => {
+              setFiltroStatus("normal");
+              setPaginaAtual(1);
+            }}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              filtroStatus === 'normal' 
-                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
-                : 'bg-slate-950 text-slate-400 border border-slate-800 hover:bg-slate-800'
+              filtroStatus === "normal"
+                ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                : "bg-slate-950 text-slate-400 border border-slate-800 hover:bg-slate-800"
             }`}
           >
             Normal
@@ -164,20 +183,31 @@ export default function TabelaProdutos({ produtos }: Props) {
             ) : (
               produtosPaginados.map((item) => {
                 const emAlerta = item.estoque_atual <= item.estoque_minimo;
-                
+
                 return (
-                  <tr key={item.id} className="hover:bg-slate-800/50 transition-colors">
-                    <td className="py-3 px-4 font-mono text-xs text-slate-400">{item.sku}</td>
-                    <td className="py-3 px-4 font-medium text-slate-200">{item.nome}</td>
+                  <tr
+                    key={item.id}
+                    className="hover:bg-slate-800/50 transition-colors"
+                  >
+                    <td className="py-3 px-4 font-mono text-xs text-slate-400">
+                      {item.sku}
+                    </td>
+                    <td className="py-3 px-4 font-medium text-slate-200">
+                      {item.nome}
+                    </td>
                     <td className="py-3 px-4 text-xs text-slate-400">
                       <span className="bg-slate-800 px-2 py-1 rounded-md border border-slate-700 whitespace-nowrap inline-block">
                         {formatarCategoria(item.categoria)}
                       </span>
                     </td>
                     <td className="py-3 px-4 font-mono text-emerald-400">
-                      {item.preco_venda > 0 ? `R$ ${Number(item.preco_venda).toFixed(2)}` : '—'}
+                      {item.preco_venda > 0
+                        ? `R$ ${Number(item.preco_venda).toFixed(2)}`
+                        : "—"}
                     </td>
-                    <td className="py-3 px-4 font-semibold">{item.estoque_atual}</td>
+                    <td className="py-3 px-4 font-semibold">
+                      {item.estoque_atual}
+                    </td>
                     <td className="py-3 px-4">
                       {emAlerta ? (
                         <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap inline-block">
@@ -208,7 +238,8 @@ export default function TabelaProdutos({ produtos }: Props) {
       {/* Controles de Paginação */}
       <div className="flex justify-between items-center pt-2 text-xs text-slate-400">
         <span>
-          Página {paginaAtual} de {totalPaginas} ({produtosFiltrados.length} itens exibidos)
+          Página {paginaAtual} de {totalPaginas} ({produtosFiltrados.length}{" "}
+          itens exibidos)
         </span>
         <div className="flex gap-2">
           <button
