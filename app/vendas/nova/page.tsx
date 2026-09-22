@@ -13,6 +13,11 @@ interface Produto {
   tipo: string;
 }
 
+interface Cliente {
+  id: string;
+  nome: string;
+}
+
 interface ItemCarrinho {
   produto_id: string;
   nome: string;
@@ -24,66 +29,98 @@ interface ItemCarrinho {
 export default function NovaVendaPage() {
   const router = useRouter();
 
+  // Estados de Clientes
+  const [clientes, setClientes] = useState<Cliente[]>([]);
+  const [clienteNome, setClienteNome] = useState<string>('Cliente Avulso');
+
+  // Estados de Produtos e Carrinho
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [produtoSelecionadoId, setProdutoSelecionadoId] = useState<string>('');
   const [quantidade, setQuantidade] = useState<number>(1);
+  const [precoUnitarioInput, setPrecoUnitarioInput] = useState<number>(0);
   const [carrinho, setCarrinho] = useState<ItemCarrinho[]>([]);
 
   // Estados de Carregamento
   const [carregandoProdutos, setCarregandoProdutos] = useState<boolean>(true);
+  const [carregandoClientes, setCarregandoClientes] = useState<boolean>(true);
   const [erroCarregamento, setErroCarregamento] = useState<string | null>(null);
 
-  // Dados da Venda
-  const [clienteNome, setClienteNome] = useState<string>('Cliente Avulso');
+  // Dados de Pagamento e Finalização
   const [formaPagamento, setFormaPagamento] = useState<string>('PIX');
   const [desconto, setDesconto] = useState<number>(0);
   const [observacao, setObservacao] = useState<string>('');
   const [carregandoVenda, setCarregandoVenda] = useState<boolean>(false);
 
-  // Carrega produtos ordenados pelo maior estoque e filtra RIGOROSAMENTE PRODUTO_FINAL
+  // Carrega clientes e produtos ao inicializar
   useEffect(() => {
     let montado = true;
 
-    async function carregarProdutos() {
+    async function carregarDados() {
       try {
         setCarregandoProdutos(true);
+        setCarregandoClientes(true);
         setErroCarregamento(null);
 
-        const { data, error } = await supabase
+        // 1. Busca clientes
+        const { data: dataClientes, error: errorClientes } = await supabase
+          .from('clientes')
+          .select('id, nome')
+          .order('nome', { ascending: true });
+
+        if (errorClientes) console.warn('Erro ao carregar clientes:', errorClientes);
+
+        // 2. Busca produtos
+        const { data: dataProdutos, error: errorProdutos } = await supabase
           .from('produtos')
           .select('id, sku, nome, preco_venda, estoque_atual, tipo')
           .order('estoque_atual', { ascending: false });
 
-        if (error) throw error;
+        if (errorProdutos) throw errorProdutos;
 
-        if (montado && data) {
-          // Filtro estrito: ignora NULLs e valida PRODUTO_FINAL / PRODUTO FINAL
-          const produtosFinais = data.filter((p) => {
-            if (!p.tipo) return false;
-            const tipoTratado = String(p.tipo).toUpperCase().replace(/_/g, ' ').trim();
-            return tipoTratado === 'PRODUTO FINAL';
-          });
+        if (montado) {
+          if (dataClientes) {
+            setClientes(dataClientes);
+          }
 
-          setProdutos(produtosFinais);
+          if (dataProdutos) {
+            const produtosFinais = dataProdutos.filter((p) => {
+              if (!p.tipo) return false;
+              const tipoTratado = String(p.tipo).toUpperCase().replace(/_/g, ' ').trim();
+              return tipoTratado === 'PRODUTO FINAL';
+            });
+            setProdutos(produtosFinais);
+          }
         }
       } catch (err: any) {
         console.error('Erro ao conectar com Supabase:', err);
         if (montado) {
-          setErroCarregamento(err.message || 'Erro ao carregar lista de produtos.');
+          setErroCarregamento(err.message || 'Erro ao carregar dados.');
         }
       } finally {
         if (montado) {
+          setCarregandoClientes(false);
           setCarregandoProdutos(false);
         }
       }
     }
 
-    carregarProdutos();
+    carregarDados();
 
     return () => {
       montado = false;
     };
   }, []);
+
+  // Atualiza o preço unitário ao selecionar um produto
+  const handleSelecionarProduto = (id: string) => {
+    setProdutoSelecionadoId(id);
+    const prod = produtos.find((p) => p.id === id);
+    if (prod) {
+      setPrecoUnitarioInput(prod.preco_venda);
+    } else {
+      setPrecoUnitarioInput(0);
+    }
+  };
 
   const adicionarAoCarrinho = () => {
     if (!produtoSelecionadoId) {
@@ -104,6 +141,7 @@ export default function NovaVendaPage() {
       return;
     }
 
+    const precoEfetivo = Math.max(0, precoUnitarioInput);
     const itemExistente = carrinho.find((item) => item.produto_id === produto.id);
 
     if (itemExistente) {
@@ -119,7 +157,8 @@ export default function NovaVendaPage() {
             ? {
                 ...item,
                 quantidade: novaQtd,
-                subtotal: novaQtd * item.preco_unitario,
+                preco_unitario: precoEfetivo,
+                subtotal: novaQtd * precoEfetivo,
               }
             : item
         )
@@ -131,14 +170,54 @@ export default function NovaVendaPage() {
           produto_id: produto.id,
           nome: produto.nome,
           quantidade: quantidade,
-          preco_unitario: produto.preco_venda,
-          subtotal: quantidade * produto.preco_venda,
+          preco_unitario: precoEfetivo,
+          subtotal: quantidade * precoEfetivo,
         },
       ]);
     }
 
     setProdutoSelecionadoId('');
     setQuantidade(1);
+    setPrecoUnitarioInput(0);
+  };
+
+  // Permite alterar o preço unitário diretamente na tabela do carrinho
+  const atualizarPrecoItemCarrinho = (produto_id: string, novoPreco: number) => {
+    const precoValido = Math.max(0, novoPreco);
+    setCarrinho(
+      carrinho.map((item) =>
+        item.produto_id === produto_id
+          ? {
+              ...item,
+              preco_unitario: precoValido,
+              subtotal: item.quantidade * precoValido,
+            }
+          : item
+      )
+    );
+  };
+
+  // Permite alterar a quantidade diretamente na tabela do carrinho
+  const atualizarQuantidadeItemCarrinho = (produto_id: string, novaQtd: number) => {
+    const produto = produtos.find((p) => p.id === produto_id);
+    const qtdValida = Math.max(1, novaQtd);
+
+    if (produto && qtdValida > produto.estoque_atual) {
+      alert(`Quantidade ultrapassa o estoque disponível (${produto.estoque_atual} un).`);
+      return;
+    }
+
+    setCarrinho(
+      carrinho.map((item) =>
+        item.produto_id === produto_id
+          ? {
+              ...item,
+              quantidade: qtdValida,
+              subtotal: qtdValida * item.preco_unitario,
+            }
+          : item
+      )
+    );
   };
 
   const removerDoCarrinho = (produto_id: string) => {
@@ -226,14 +305,46 @@ export default function NovaVendaPage() {
           </button>
         </div>
 
-        {/* Painel 1: Seleção de Produtos */}
+        {/* Painel 1: Seleção do Cliente (Destaque Centralizado) */}
+        <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-4">
+          <h2 className="text-lg font-semibold text-slate-200 border-b border-slate-800 pb-2 text-center sm:text-left">
+            1. Identificação do Cliente
+          </h2>
+          <div>
+            <label className="block text-xs uppercase tracking-wider font-semibold text-slate-400 text-center mb-2">
+              Selecione o Cliente
+            </label>
+            {carregandoClientes ? (
+              <div className="p-3.5 border border-slate-800 rounded-lg bg-slate-950 text-slate-500 text-center text-sm animate-pulse">
+                Carregando lista de clientes...
+              </div>
+            ) : (
+              <select
+                value={clienteNome}
+                onChange={(e) => setClienteNome(e.target.value)}
+                className="w-full p-3.5 border border-slate-700 rounded-lg bg-slate-950 text-white font-bold text-lg text-center cursor-pointer focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+              >
+                <option value="Cliente Avulso" className="bg-slate-900 text-center py-1">
+                  Cliente Avulso
+                </option>
+                {clientes.map((c) => (
+                  <option key={c.id} value={c.nome} className="bg-slate-900 text-center py-1">
+                    {c.nome}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        </div>
+
+        {/* Painel 2: Seleção de Produtos */}
         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-4">
           <h2 className="text-lg font-semibold text-slate-200 border-b border-slate-800 pb-2">
-            1. Seleção de Produtos
+            2. Seleção de Produtos
           </h2>
           
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-            <div className="md:col-span-2">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+            <div className="md:col-span-5">
               <label className="block text-sm font-semibold text-slate-300 mb-1">
                 Produto
               </label>
@@ -248,8 +359,8 @@ export default function NovaVendaPage() {
               ) : (
                 <select
                   value={produtoSelecionadoId}
-                  onChange={(e) => setProdutoSelecionadoId(e.target.value)}
-                  className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  onChange={(e) => handleSelecionarProduto(e.target.value)}
+                  className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 font-medium focus:ring-2 focus:ring-blue-500 outline-none"
                 >
                   <option value="" className="text-slate-500 bg-slate-900">Selecione um produto...</option>
                   {produtos.map((produto) => (
@@ -261,9 +372,9 @@ export default function NovaVendaPage() {
               )}
             </div>
 
-            <div>
+            <div className="md:col-span-2">
               <label className="block text-sm font-semibold text-slate-300 mb-1">
-                Quantidade
+                Qtd
               </label>
               <input
                 type="number"
@@ -274,31 +385,46 @@ export default function NovaVendaPage() {
               />
             </div>
 
+            <div className="md:col-span-3">
+              <label className="block text-sm font-semibold text-slate-300 mb-1">
+                Preço Unit. (R$)
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={precoUnitarioInput}
+                onChange={(e) => setPrecoUnitarioInput(Number(e.target.value))}
+                className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-emerald-400 font-bold focus:ring-2 focus:ring-blue-500 outline-none"
+                placeholder="0.00"
+              />
+            </div>
+
             <button
               type="button"
               onClick={adicionarAoCarrinho}
               disabled={carregandoProdutos}
-              className="w-full bg-blue-600 hover:bg-blue-500 text-white p-2.5 rounded-lg font-semibold transition-colors shadow-sm disabled:opacity-50"
+              className="md:col-span-2 w-full bg-blue-600 hover:bg-blue-500 text-white p-2.5 rounded-lg font-semibold transition-colors shadow-sm disabled:opacity-50"
             >
               Adicionar
             </button>
           </div>
         </div>
 
-        {/* Painel 2: Tabela do Carrinho */}
+        {/* Painel 3: Tabela do Carrinho (com Edição de Preço Unitário e Subtotal) */}
         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-4">
           <h2 className="text-lg font-semibold text-slate-200 border-b border-slate-800 pb-2">
-            2. Itens Adicionados
+            3. Itens Adicionados
           </h2>
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-slate-800 bg-slate-950/50 text-xs font-bold text-slate-400 uppercase tracking-wider">
                   <th className="p-3.5">Produto</th>
-                  <th className="p-3.5 text-center">Qtd</th>
-                  <th className="p-3.5 text-right">Preço Unit.</th>
-                  <th className="p-3.5 text-right">Subtotal</th>
-                  <th className="p-3.5 text-center">Ação</th>
+                  <th className="p-3.5 text-center w-24">Qtd</th>
+                  <th className="p-3.5 text-right w-36">Preço Unit. (R$)</th>
+                  <th className="p-3.5 text-right w-36">Subtotal</th>
+                  <th className="p-3.5 text-center w-20">Ação</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
@@ -312,9 +438,31 @@ export default function NovaVendaPage() {
                   carrinho.map((item) => (
                     <tr key={item.produto_id} className="hover:bg-slate-800/40 transition-colors">
                       <td className="p-3.5 font-semibold text-slate-100">{item.nome}</td>
-                      <td className="p-3.5 text-center text-slate-200 font-medium">{item.quantidade}</td>
-                      <td className="p-3.5 text-right text-slate-300">
-                        R$ {item.preco_unitario.toFixed(2)}
+                      <td className="p-3.5 text-center">
+                        <input
+                          type="number"
+                          min="1"
+                          value={item.quantidade}
+                          onChange={(e) =>
+                            atualizarQuantidadeItemCarrinho(item.produto_id, Number(e.target.value))
+                          }
+                          className="w-16 p-1.5 border border-slate-700 rounded bg-slate-950 text-center text-slate-100 font-semibold focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                        />
+                      </td>
+                      <td className="p-3.5 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <span className="text-xs text-slate-400">R$</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={item.preco_unitario}
+                            onChange={(e) =>
+                              atualizarPrecoItemCarrinho(item.produto_id, Number(e.target.value))
+                            }
+                            className="w-24 p-1.5 border border-slate-700 rounded bg-slate-950 text-right text-emerald-400 font-bold focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                          />
+                        </div>
                       </td>
                       <td className="p-3.5 text-right font-bold text-white">
                         R$ {item.subtotal.toFixed(2)}
@@ -335,26 +483,13 @@ export default function NovaVendaPage() {
           </div>
         </div>
 
-        {/* Painel 3: Pagamento e Finalização */}
+        {/* Painel 4: Pagamento e Finalização */}
         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-6">
           <h2 className="text-lg font-semibold text-slate-200 border-b border-slate-800 pb-2">
-            3. Pagamento e Finalização
+            4. Pagamento e Fechamento
           </h2>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-slate-300 mb-1">
-                Nome do Cliente
-              </label>
-              <input
-                type="text"
-                value={clienteNome}
-                onChange={(e) => setClienteNome(e.target.value)}
-                className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 font-medium focus:ring-2 focus:ring-blue-500 outline-none"
-                placeholder="Ex: João da Silva"
-              />
-            </div>
-
             <div>
               <label className="block text-sm font-semibold text-slate-300 mb-1">
                 Forma de Pagamento
@@ -387,7 +522,7 @@ export default function NovaVendaPage() {
               />
             </div>
 
-            <div>
+            <div className="md:col-span-2">
               <label className="block text-sm font-semibold text-slate-300 mb-1">
                 Observações
               </label>
