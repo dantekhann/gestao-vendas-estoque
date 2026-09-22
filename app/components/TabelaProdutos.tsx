@@ -58,7 +58,7 @@ export default function TabelaProdutos({ produtos }: Props) {
       case 'EMBALAGEM': return 'Embalagem';
       case 'EPI': return 'EPI';
       case 'CONSUMO_INTERNO': return 'Limpeza/Consumo';
-      default: return 'Produto Acabado';
+      default: return 'Produto Final';
     }
   };
 
@@ -170,7 +170,7 @@ export default function TabelaProdutos({ produtos }: Props) {
                     <td className="py-3 px-4 font-mono text-xs text-slate-400">{item.sku}</td>
                     <td className="py-3 px-4 font-medium text-slate-200">{item.nome}</td>
                     <td className="py-3 px-4 text-xs text-slate-400">
-                      <span className="bg-slate-800 px-2 py-1 rounded-md border border-slate-700">
+                      <span className="bg-slate-800 px-2 py-1 rounded-md border border-slate-700 whitespace-nowrap inline-block">
                         {formatarCategoria(item.categoria)}
                       </span>
                     </td>
@@ -180,11 +180,11 @@ export default function TabelaProdutos({ produtos }: Props) {
                     <td className="py-3 px-4 font-semibold">{item.estoque_atual}</td>
                     <td className="py-3 px-4">
                       {emAlerta ? (
-                        <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded text-xs font-medium">
+                        <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap inline-block">
                           Repor Estoque
                         </span>
                       ) : (
-                        <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-xs font-medium">
+                        <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap inline-block">
                           Normal
                         </span>
                       )}
