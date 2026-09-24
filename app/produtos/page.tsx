@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 
@@ -10,6 +10,7 @@ interface Produto {
   classificacao?: string;
   preco_venda: number;
   estoque_atual: number;
+  estoque_minimo?: number;
 }
 
 const OPCOES_CLASSIFICACAO = [
@@ -31,6 +32,7 @@ export default function ProdutosAdminPage() {
   const [novaClassificacao, setNovaClassificacao] = useState<string>('Produto Finalizado');
   const [novoPreco, setNovoPreco] = useState<string>('0.00');
   const [novoEstoque, setNovoEstoque] = useState<string>('0');
+  const [novoEstoqueMinimo, setNovoEstoqueMinimo] = useState<string>('0');
   const [salvandoNovo, setSalvandoNovo] = useState<boolean>(false);
 
   // Estados para Edição Inline
@@ -39,8 +41,9 @@ export default function ProdutosAdminPage() {
   const [editClassificacao, setEditClassificacao] = useState<string>('');
   const [editPreco, setEditPreco] = useState<string>('');
   const [editEstoque, setEditEstoque] = useState<string>('');
+  const [editEstoqueMinimo, setEditEstoqueMinimo] = useState<string>('');
 
-  async function carregarProdutos() {
+  const carregarProdutos = useCallback(async () => {
     try {
       setCarregando(true);
       setErro(null);
@@ -52,16 +55,18 @@ export default function ProdutosAdminPage() {
 
       if (error) throw error;
       if (data) setProdutos(data);
-    } catch (err: any) {
-      setErro(err?.message || 'Erro ao carregar produtos.');
+    } catch (err: unknown) {
+      const errorObj = err as { message?: string };
+      setErro(errorObj?.message || 'Erro ao carregar produtos.');
     } finally {
       setCarregando(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     carregarProdutos();
-  }, []);
+  }, [carregarProdutos]);
 
   const handleAdicionarProduto = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -78,9 +83,8 @@ export default function ProdutosAdminPage() {
         classificacao: novaClassificacao,
         preco_venda: parseFloat(novoPreco) || 0,
         estoque_atual: parseInt(novoEstoque) || 0,
+        estoque_minimo: parseInt(novoEstoqueMinimo) || 0,
       };
-
-      console.log("A enviar novo produto:", dadosParaEnviar);
 
       const { error } = await supabase.from('produtos').insert([dadosParaEnviar]);
 
@@ -90,10 +94,12 @@ export default function ProdutosAdminPage() {
       setNovaClassificacao('Produto Finalizado');
       setNovoPreco('0.00');
       setNovoEstoque('0');
+      setNovoEstoqueMinimo('0');
       await carregarProdutos();
       alert('Produto adicionado com sucesso!');
-    } catch (err: any) {
-      alert(`Erro ao adicionar: ${err.message}`);
+    } catch (err: unknown) {
+      const errorObj = err as { message?: string };
+      alert(`Erro ao adicionar: ${errorObj.message}`);
     } finally {
       setSalvandoNovo(false);
     }
@@ -105,6 +111,7 @@ export default function ProdutosAdminPage() {
     setEditClassificacao(prod.classificacao || 'Produto Finalizado');
     setEditPreco(String(prod.preco_venda ?? 0));
     setEditEstoque(String(prod.estoque_atual ?? 0));
+    setEditEstoqueMinimo(String(prod.estoque_minimo ?? 0));
   };
 
   const cancelarEdicao = () => {
@@ -118,9 +125,8 @@ export default function ProdutosAdminPage() {
         classificacao: editClassificacao,
         preco_venda: parseFloat(editPreco) || 0,
         estoque_atual: parseInt(editEstoque) || 0,
+        estoque_minimo: parseInt(editEstoqueMinimo) || 0,
       };
-
-      console.log("A atualizar produto ID:", id, dadosAtualizados);
 
       const { error } = await supabase
         .from('produtos')
@@ -132,8 +138,9 @@ export default function ProdutosAdminPage() {
       setEditandoId(null);
       await carregarProdutos();
       alert('Produto atualizado com sucesso!');
-    } catch (err: any) {
-      alert(`Erro ao atualizar produto: ${err.message}`);
+    } catch (err: unknown) {
+      const errorObj = err as { message?: string };
+      alert(`Erro ao atualizar produto: ${errorObj.message}`);
     }
   };
 
@@ -146,8 +153,9 @@ export default function ProdutosAdminPage() {
 
       setProdutos((prev) => prev.filter((p) => p.id !== id));
       alert('Produto eliminado com sucesso!');
-    } catch (err: any) {
-      alert(`Erro ao eliminar: ${err.message}`);
+    } catch (err: unknown) {
+      const errorObj = err as { message?: string };
+      alert(`Erro ao eliminar: ${errorObj.message}`);
     }
   };
 
@@ -162,8 +170,8 @@ export default function ProdutosAdminPage() {
         {/* Cabeçalho */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900 p-5 rounded-xl border border-slate-800 shadow-md">
           <div>
-            <h1 className="text-2xl font-bold text-white">Gestão de Produtos</h1>
-            <p className="text-sm text-slate-400">Adicione, edite totalmente ou remova itens do catálogo - OrC Brasil</p>
+            <h1 className="text-2xl font-bold text-white">Gestão de Produtos e Estoque</h1>
+            <p className="text-sm text-slate-400">Controle de catálogo, preços e limites mínimos de estoque - OrC Brasil</p>
           </div>
           <Link
             href="/"
@@ -176,7 +184,7 @@ export default function ProdutosAdminPage() {
         {/* Formulário Adicionar Novo Produto */}
         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-4">
           <h2 className="text-lg font-semibold text-slate-200">Adicionar Novo Produto / Item</h2>
-          <form onSubmit={handleAdicionarProduto} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
+          <form onSubmit={handleAdicionarProduto} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 items-end">
             <div className="lg:col-span-2">
               <label className="block text-xs font-medium text-slate-400 mb-1">Nome do Item</label>
               <input
@@ -210,7 +218,7 @@ export default function ProdutosAdminPage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1">Estoque</label>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Estoque Atual</label>
               <input
                 type="number"
                 value={novoEstoque}
@@ -218,7 +226,16 @@ export default function ProdutosAdminPage() {
                 className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-            <div className="sm:col-span-2 lg:col-span-5 flex justify-end">
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Estoque Mínimo</label>
+              <input
+                type="number"
+                value={novoEstoqueMinimo}
+                onChange={(e) => setNovoEstoqueMinimo(e.target.value)}
+                className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div className="sm:col-span-2 lg:col-span-6 flex justify-end">
               <button
                 type="submit"
                 disabled={salvandoNovo}
@@ -259,22 +276,37 @@ export default function ProdutosAdminPage() {
                 <thead>
                   <tr className="border-b border-slate-800 bg-slate-950/50 text-xs font-bold text-slate-400 uppercase tracking-wider">
                     <th className="p-3.5">Nome do Item</th>
-                    <th className="p-3.5">Classificação Atual</th>
+                    <th className="p-3.5">Classificação</th>
                     <th className="p-3.5">Preço (R$)</th>
                     <th className="p-3.5 text-center">Estoque Atual</th>
+                    <th className="p-3.5 text-center">Estoque Mínimo</th>
                     <th className="p-3.5 text-center">Ações</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
                   {produtosFiltrados.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="text-center p-8 text-slate-500 font-medium">
+                      <td colSpan={6} className="text-center p-8 text-slate-500 font-medium">
                         Nenhum produto encontrado.
                       </td>
                     </tr>
                   ) : (
                     produtosFiltrados.map((prod) => {
                       const estaEditando = editandoId === prod.id;
+                      const atual = prod.estoque_atual ?? 0;
+                      const minimo = prod.estoque_minimo ?? 0;
+
+                      // Lógica de alerta visual para o estoquista
+                      let badgeEstoqueClass = 'bg-emerald-950/60 text-emerald-400 border-emerald-800/40';
+                      let statusTexto = `${atual} un`;
+
+                      if (atual <= 0) {
+                        badgeEstoqueClass = 'bg-red-950/65 text-red-400 border-red-800/40 animate-pulse';
+                        statusTexto = `${atual} un (Zerado)`;
+                      } else if (atual <= minimo) {
+                        badgeEstoqueClass = 'bg-amber-950/65 text-amber-400 border-amber-800/40';
+                        statusTexto = `${atual} un (Baixo)`;
+                      }
 
                       return (
                         <tr key={prod.id} className="hover:bg-slate-800/40 transition-colors">
@@ -319,15 +351,15 @@ export default function ProdutosAdminPage() {
                                 step="0.01"
                                 value={editPreco}
                                 onChange={(e) => setEditPreco(e.target.value)}
-                                className="w-28 p-1.5 border border-blue-500 rounded bg-slate-950 text-white text-sm outline-none"
+                                className="w-24 p-1.5 border border-blue-500 rounded bg-slate-950 text-white text-sm outline-none"
                               />
                             ) : (
                               `R$ ${(Number(prod.preco_venda) || 0).toFixed(2)}`
                             )}
                           </td>
 
-                          {/* Estoque */}
-                          <td className="p-3.5 text-center font-bold text-emerald-400">
+                          {/* Estoque Atual com Alerta Visual */}
+                          <td className="p-3.5 text-center">
                             {estaEditando ? (
                               <input
                                 type="number"
@@ -336,7 +368,23 @@ export default function ProdutosAdminPage() {
                                 className="w-20 p-1.5 border border-blue-500 rounded bg-slate-950 text-white text-sm outline-none text-center mx-auto block"
                               />
                             ) : (
-                              `${prod.estoque_atual ?? 0} un`
+                              <span className={`inline-block px-2.5 py-1 rounded-md border text-xs font-bold ${badgeEstoqueClass}`}>
+                                {statusTexto}
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Estoque Mínimo */}
+                          <td className="p-3.5 text-center text-slate-300">
+                            {estaEditando ? (
+                              <input
+                                type="number"
+                                value={editEstoqueMinimo}
+                                onChange={(e) => setEditEstoqueMinimo(e.target.value)}
+                                className="w-20 p-1.5 border border-blue-500 rounded bg-slate-950 text-white text-sm outline-none text-center mx-auto block"
+                              />
+                            ) : (
+                              `${prod.estoque_minimo ?? 0} un`
                             )}
                           </td>
 

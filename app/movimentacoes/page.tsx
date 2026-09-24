@@ -34,81 +34,104 @@ export default function MovimentacoesEstoquePage() {
   const [filtroDataFim, setFiltroDataFim] = useState<string>('');
   const [filtroBusca, setFiltroBusca] = useState<string>('');
 
-  async function carregarMovimentacoes() {
-    try {
-      setCarregando(true);
-      setErro(null);
-
-      // Consulta 1: Vendas na tabela 'movimentacoes'
-      const promVendas = supabase
-        .from('movimentacoes')
-        .select(`
-          id,
-          produto_id,
-          tipo,
-          quantidade,
-          observacao,
-          created_at,
-          produtos (
-            id,
-            nome,
-            estoque_atual
-          )
-        `);
-
-      // Consulta 2: Entradas, Saídas e Ajustes na tabela 'movimentacoes_estoque'
-      const promOutras = supabase
-        .from('movimentacoes_estoque')
-        .select(`
-          id,
-          produto_id,
-          tipo,
-          quantidade,
-          observacao,
-          created_at,
-          produtos (
-            id,
-            nome,
-            estoque_atual
-          )
-        `);
-
-      const [resVendas, resOutras] = await Promise.all([promVendas, promOutras]);
-
-      if (resVendas.error) throw resVendas.error;
-      if (resOutras.error) throw resOutras.error;
-
-      // Mapear identificando a tabela de origem para facilitar a exclusão
-      const listaVendas: Movimentacao[] = (resVendas.data || []).map((item) => ({
-        ...item,
-        tabelaOrigem: 'movimentacoes',
-      }));
-
-      const listaOutras: Movimentacao[] = (resOutras.data || []).map((item) => ({
-        ...item,
-        tabelaOrigem: 'movimentacoes_estoque',
-      }));
-
-      // Unir as duas listas
-      const combinadas = [...listaVendas, ...listaOutras];
-
-      // Ordenar da mais recente para a mais antiga por created_at
-      combinadas.sort((a, b) => {
-        const dataA = new Date(a.created_at || 0).getTime();
-        const dataB = new Date(b.created_at || 0).getTime();
-        if (dataB !== dataA) return dataB - dataA;
-        return String(b.id).localeCompare(String(a.id));
-      });
-
-      setMovimentacoes(combinadas);
-    } catch (err: any) {
-      setErro(err?.message || 'Erro ao carregar movimentações de estoque.');
-    } finally {
-      setCarregando(false);
-    }
-  }
-
   useEffect(() => {
+    async function carregarMovimentacoes() {
+      try {
+        setCarregando(true);
+        setErro(null);
+
+        // Consulta 1: Vendas na tabela 'movimentacoes'
+        const promVendas = supabase
+          .from('movimentacoes')
+          .select(`
+            id,
+            produto_id,
+            tipo,
+            quantidade,
+            observacao,
+            created_at,
+            produtos (
+              id,
+              nome,
+              estoque_atual
+            )
+          `);
+
+        // Consulta 2: Entradas, Saídas e Ajustes na tabela 'movimentacoes_estoque'
+        const promOutras = supabase
+          .from('movimentacoes_estoque')
+          .select(`
+            id,
+            produto_id,
+            tipo,
+            quantidade,
+            observacao,
+            created_at,
+            produtos (
+              id,
+              nome,
+              estoque_atual
+            )
+          `);
+
+        const [resVendas, resOutras] = await Promise.all([promVendas, promOutras]);
+
+        if (resVendas.error) throw resVendas.error;
+        if (resOutras.error) throw resOutras.error;
+
+        // Mapear identificando a tabela de origem para facilitar a exclusão
+        const listaVendas: Movimentacao[] = (resVendas.data || []).map((item) => ({
+          ...item,
+          tabelaOrigem: 'movimentacoes',
+        }));
+
+        const listaOutras: Movimentacao[] = (resOutras.data || []).map((item) => ({
+          ...item,
+          tabelaOrigem: 'movimentacoes_estoque',
+        }));
+
+        // Unir as duas listas
+        const combinadas = [...listaVendas, ...listaOutras];
+
+        // Função robusta para extrair o timestamp real de qualquer registo (Venda ou Estoque)
+        const obterTimestamp = (m: Movimentacao) => {
+          if (m.observacao) {
+            const match = m.observacao.match(/\[Data:\s*([\d-]+)\]/);
+            if (match && match[1]) {
+              const t = new Date(match[1] + 'T00:00:00').getTime();
+              if (!isNaN(t)) return t;
+            }
+          }
+
+          if (m.created_at) {
+            const t = new Date(m.created_at).getTime();
+            if (!isNaN(t) && t > 0) return t;
+          }
+
+          return 0;
+        };
+
+        // Ordenação rigorosa unificada (da mais recente para a mais antiga)
+        combinadas.sort((a, b) => {
+          const timeA = obterTimestamp(a);
+          const timeB = obterTimestamp(b);
+
+          if (timeB !== timeA) {
+            return timeB - timeA;
+          }
+
+          return String(b.id).localeCompare(String(a.id));
+        });
+
+        setMovimentacoes(combinadas);
+      } catch (err: unknown) {
+        const errorObj = err as { message?: string };
+        setErro(errorObj?.message || 'Erro ao carregar movimentações de estoque.');
+      } finally {
+        setCarregando(false);
+      }
+    }
+
     carregarMovimentacoes();
   }, []);
 
@@ -170,9 +193,10 @@ export default function MovimentacoesEstoquePage() {
 
       setMovimentacoes((prev) => prev.filter((m) => m.id !== mov.id));
       alert('Movimentação excluída e estoque revertido com sucesso!');
-    } catch (err: any) {
-      console.error('Erro ao excluir movimentação:', err);
-      alert(`Erro ao excluir: ${err.message || 'Erro desconhecido'}`);
+    } catch (err: unknown) {
+      const errorObj = err as { message?: string };
+      console.error('Erro ao excluir movimentação:', errorObj);
+      alert(`Erro ao excluir: ${errorObj.message || 'Erro desconhecido'}`);
     } finally {
       setExcluindoId(null);
     }

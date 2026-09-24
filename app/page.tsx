@@ -16,6 +16,7 @@ interface Produto {
   categoria?: string | null;
   tipo?: string | null;
   estoque_atual: number;
+  estoque_minimo?: number | null;
 }
 
 // Função para formatar o rótulo dando prioridade absoluta à nova coluna 'classificacao'
@@ -102,11 +103,16 @@ export default function EstoquePage() {
       matchCat = rotuloAtual.includes(categoriaFiltro.toUpperCase());
     }
     
+    const atual = p.estoque_atual ?? 0;
+    const minimo = p.estoque_minimo ?? 0;
+
     let matchStatus = true;
     if (statusFiltro === 'ZERADO') {
-      matchStatus = p.estoque_atual === 0;
-    } else if (statusFiltro === 'DISPONIVEL') {
-      matchStatus = p.estoque_atual > 0;
+      matchStatus = atual <= 0;
+    } else if (statusFiltro === 'BAIXO') {
+      matchStatus = atual > 0 && atual <= minimo;
+    } else if (statusFiltro === 'NORMAL') {
+      matchStatus = atual > minimo;
     }
 
     return matchNome && matchCat && matchStatus;
@@ -188,8 +194,9 @@ export default function EstoquePage() {
               className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
             >
               <option value="TODOS">Todos os Status</option>
-              <option value="DISPONIVEL">Em Estoque (&gt; 0)</option>
-              <option value="ZERADO">Zerado (0)</option>
+              <option value="NORMAL">Estoque Normal</option>
+              <option value="BAIXO">Abaixo do Mínimo (Alerta)</option>
+              <option value="ZERADO">Zerado / Crítico</option>
             </select>
           </div>
         </div>
@@ -202,19 +209,20 @@ export default function EstoquePage() {
                 <tr className="border-b border-slate-800 text-xs font-bold text-slate-400 uppercase tracking-wider">
                   <th className="p-4 sm:p-5">Nome do Item</th>
                   <th className="p-4 sm:p-5">Classificação</th>
+                  <th className="p-4 sm:p-5 text-center">Estoque Mínimo</th>
                   <th className="p-4 sm:p-5 text-right">Estoque Atual</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 text-sm">
                 {carregando ? (
                   <tr>
-                    <td colSpan={3} className="p-8 text-center text-slate-500">
+                    <td colSpan={4} className="p-8 text-center text-slate-500">
                       A carregar stock...
                     </td>
                   </tr>
                 ) : produtosFiltrados.length === 0 ? (
                   <tr>
-                    <td colSpan={3} className="p-8 text-center text-slate-500">
+                    <td colSpan={4} className="p-8 text-center text-slate-500">
                       Nenhum produto encontrado.
                     </td>
                   </tr>
@@ -222,6 +230,21 @@ export default function EstoquePage() {
                   produtosFiltrados.map((p) => {
                     const rotuloExibicao = formatarRotulo(p.classificacao, p.categoria, p.tipo, p.nome);
                     const estiloCor = obterEstiloRotulo(rotuloExibicao);
+                    
+                    const atual = p.estoque_atual ?? 0;
+                    const minimo = p.estoque_minimo ?? 0;
+
+                    let badgeEstoqueClass = 'text-emerald-400 font-extrabold';
+                    let statusTexto = `${atual} un`;
+
+                    if (atual <= 0) {
+                      badgeEstoqueClass = 'bg-red-950/65 text-red-400 border border-red-800/40 px-2.5 py-1 rounded-md font-bold animate-pulse inline-block';
+                      statusTexto = `${atual} un (Zerado)`;
+                    } else if (atual <= minimo) {
+                      badgeEstoqueClass = 'bg-amber-950/65 text-amber-400 border border-amber-800/40 px-2.5 py-1 rounded-md font-bold inline-block';
+                      statusTexto = `${atual} un (Baixo)`;
+                    }
+
                     return (
                       <tr key={p.id} className="hover:bg-slate-800/40 transition-colors">
                         <td className="p-4 sm:p-5 font-semibold text-slate-100">{p.nome}</td>
@@ -230,8 +253,13 @@ export default function EstoquePage() {
                             {rotuloExibicao}
                           </span>
                         </td>
-                        <td className="p-4 sm:p-5 text-right font-extrabold text-emerald-400">
-                          {p.estoque_atual} un
+                        <td className="p-4 sm:p-5 text-center text-slate-400 font-medium">
+                          {minimo} un
+                        </td>
+                        <td className="p-4 sm:p-5 text-right">
+                          <span className={badgeEstoqueClass}>
+                            {statusTexto}
+                          </span>
                         </td>
                       </tr>
                     );

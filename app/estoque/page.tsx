@@ -58,13 +58,13 @@ export default function EstoquePage() {
         if (error) throw error;
 
         if (montado && data) {
-          console.log("Dados vindos do Supabase (Estoque):", data); // <--- Veja isto no F12 > Console
           setProdutos(data);
         }
-      } catch (err: any) {
-        console.error('Erro ao carregar estoque:', err);
+      } catch (err: unknown) {
+        const errorObj = err as { message?: string };
+        console.error('Erro ao carregar estoque:', errorObj);
         if (montado) {
-          setErro(err.message || 'Erro ao conectar com o banco de dados.');
+          setErro(errorObj.message || 'Erro ao conectar com o banco de dados.');
         }
       } finally {
         if (montado) {
@@ -84,16 +84,19 @@ export default function EstoquePage() {
     return produtos.filter((produto) => {
       const bateuNome = produto.nome.toLowerCase().includes(buscaNome.toLowerCase());
       
-      // Tenta apanhar qualquer variação de nome de coluna que possa vir do Supabase
       const valorClassificacao = produto.classificacao || produto.Classificacao || produto.classificação || produto.categoria || 'Produto Finalizado';
-      
       const bateuClassificacao = filtroClassificacao === 'TODAS' || valorClassificacao === filtroClassificacao;
 
+      const atual = produto.estoque_atual ?? 0;
+      const minimo = produto.estoque_minimo ?? 0;
+
       let bateuEstoque = true;
-      if (filtroEstoque === 'DISPONIVEL') {
-        bateuEstoque = produto.estoque_atual > 0;
-      } else if (filtroEstoque === 'ESGOTADO') {
-        bateuEstoque = produto.estoque_atual <= 0;
+      if (filtroEstoque === 'NORMAL') {
+        bateuEstoque = atual > minimo;
+      } else if (filtroEstoque === 'BAIXO') {
+        bateuEstoque = atual > 0 && atual <= minimo;
+      } else if (filtroEstoque === 'ZERADO') {
+        bateuEstoque = atual <= 0;
       }
 
       return bateuNome && bateuClassificacao && bateuEstoque;
@@ -139,7 +142,7 @@ export default function EstoquePage() {
             <select
               value={filtroClassificacao}
               onChange={(e) => setFiltroClassificacao(e.target.value)}
-              className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+              className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm focus:ring-2 focus:ring-emerald-500 outline-none cursor-pointer"
             >
               <option value="TODAS" className="bg-slate-900">Todas as Classificações</option>
               {OPCOES_CLASSIFICACAO.map((opt) => (
@@ -153,11 +156,12 @@ export default function EstoquePage() {
             <select
               value={filtroEstoque}
               onChange={(e) => setFiltroEstoque(e.target.value)}
-              className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+              className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm focus:ring-2 focus:ring-emerald-500 outline-none cursor-pointer"
             >
               <option value="TODOS" className="bg-slate-900">Todos os Status</option>
-              <option value="DISPONIVEL" className="bg-slate-900">Apenas Disponíveis (&gt; 0)</option>
-              <option value="ESGOTADO" className="bg-slate-900">Apenas Esgotados (≤ 0)</option>
+              <option value="NORMAL" className="bg-slate-900">Estoque Normal</option>
+              <option value="BAIXO" className="bg-slate-900">Abaixo do Mínimo (Alerta)</option>
+              <option value="ZERADO" className="bg-slate-900">Zerados / Críticos</option>
             </select>
           </div>
         </div>
@@ -180,19 +184,35 @@ export default function EstoquePage() {
                     <th className="p-3.5">Nome do Item</th>
                     <th className="p-3.5">Classificação</th>
                     <th className="p-3.5 text-right">Preço Venda</th>
+                    <th className="p-3.5 text-center">Estoque Mínimo</th>
                     <th className="p-3.5 text-right">Estoque Atual</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
                   {produtosFiltrados.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="text-center p-6 text-slate-500 font-medium">
+                      <td colSpan={5} className="text-center p-6 text-slate-500 font-medium">
                         Nenhum item encontrado com os filtros selecionados.
                       </td>
                     </tr>
                   ) : (
                     produtosFiltrados.map((produto) => {
                       const tipoExibicao = produto.classificacao || produto.Classificacao || produto.classificação || produto.categoria || 'Produto Finalizado';
+                      
+                      const atual = produto.estoque_atual ?? 0;
+                      const minimo = produto.estoque_minimo ?? 0;
+
+                      // Lógica de estilos visuais e badges dinâmicos
+                      let badgeEstoqueClass = 'text-emerald-400 font-extrabold';
+                      let statusTexto = `${atual} un`;
+
+                      if (atual <= 0) {
+                        badgeEstoqueClass = 'bg-red-950/65 text-red-400 border border-red-800/40 px-2.5 py-1 rounded-md font-bold animate-pulse inline-block';
+                        statusTexto = `${atual} un (Zerado)`;
+                      } else if (atual <= minimo) {
+                        badgeEstoqueClass = 'bg-amber-950/65 text-amber-400 border border-amber-800/40 px-2.5 py-1 rounded-md font-bold inline-block';
+                        statusTexto = `${atual} un (Baixo)`;
+                      }
 
                       return (
                         <tr key={produto.id} className="hover:bg-slate-800/40 transition-colors">
@@ -205,9 +225,12 @@ export default function EstoquePage() {
                           <td className="p-3.5 text-right font-mono text-emerald-400">
                             {produto.preco_venda > 0 ? `R$ ${Number(produto.preco_venda).toFixed(2)}` : '—'}
                           </td>
-                          <td className="p-3.5 text-right font-bold text-slate-100">
-                            <span className={produto.estoque_atual <= (produto.estoque_minimo || 0) ? 'text-amber-400' : 'text-slate-100'}>
-                              {produto.estoque_atual} un
+                          <td className="p-3.5 text-center font-medium text-slate-400">
+                            {minimo} un
+                          </td>
+                          <td className="p-3.5 text-right">
+                            <span className={badgeEstoqueClass}>
+                              {statusTexto}
                             </span>
                           </td>
                         </tr>
