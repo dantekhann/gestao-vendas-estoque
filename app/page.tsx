@@ -12,8 +12,43 @@ const supabase = createClient(
 interface Produto {
   id: string;
   nome: string;
-  categoria?: string;
+  categoria?: string | null;
+  tipo?: string | null;
   estoque_atual: number;
+}
+
+// Função para traduzir e formalizar a categoria/tipo conforme a regra de negócio
+function formatarRotulo(cat: string | null | undefined, tipo: string | null | undefined) {
+  const valor = (tipo || cat || '').toUpperCase().trim();
+
+  if (valor.includes('EPI')) return 'EPI';
+  if (valor.includes('MATERIA') || valor.includes('INSUMO')) return 'INSUMO';
+  if (valor.includes('CONSUMO') || valor.includes('ALMOXARIFADO')) return 'ALMOXARIFADO';
+  if (valor.includes('EMBALAGEM')) return 'EMBALAGEM';
+  if (valor.includes('ACABADO') || valor.includes('PRODUTO')) return 'PRODUTO FINALIZADO';
+  
+  if (!valor) return 'SEM CATEGORIA';
+  return valor.replace(/_/g, ' ');
+}
+
+// Cores personalizadas e distintas para cada classificação
+function obterEstiloRotulo(cat: string | null | undefined, tipo: string | null | undefined) {
+  const rotulo = formatarRotulo(cat, tipo);
+  
+  switch (rotulo) {
+    case 'EPI':
+      return 'bg-emerald-950/60 text-emerald-400 border-emerald-800/40';
+    case 'INSUMO':
+      return 'bg-blue-950/60 text-blue-400 border-blue-800/40';
+    case 'ALMOXARIFADO':
+      return 'bg-purple-950/60 text-purple-400 border-purple-800/40';
+    case 'EMBALAGEM':
+      return 'bg-amber-950/60 text-amber-400 border-amber-800/40';
+    case 'PRODUTO FINALIZADO':
+      return 'bg-rose-950/60 text-rose-400 border-rose-800/40';
+    default:
+      return 'bg-slate-800 text-slate-400 border-slate-700';
+  }
 }
 
 export default function EstoquePage() {
@@ -43,9 +78,25 @@ export default function EstoquePage() {
   }, []);
 
   const produtosFiltrados = produtos.filter((p) => {
+    const rotuloAtual = formatarRotulo(p.categoria, p.tipo);
+
     const matchNome = p.nome.toLowerCase().includes(busca.toLowerCase());
-    const matchCat = categoriaFiltro === 'TODAS' || p.categoria === categoriaFiltro;
-    return matchNome && matchCat;
+    
+    let matchCat = true;
+    if (categoriaFiltro === 'SEM_CATEGORIA') {
+      matchCat = !p.categoria && !p.tipo;
+    } else if (categoriaFiltro !== 'TODAS') {
+      matchCat = rotuloAtual === categoriaFiltro;
+    }
+    
+    let matchStatus = true;
+    if (statusFiltro === 'ZERADO') {
+      matchStatus = p.estoque_atual === 0;
+    } else if (statusFiltro === 'DISPONIVEL') {
+      matchStatus = p.estoque_atual > 0;
+    }
+
+    return matchNome && matchCat && matchStatus;
   });
 
   return (
@@ -56,33 +107,33 @@ export default function EstoquePage() {
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-xl gap-4">
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">Situação de Estoque</h1>
-            <p className="text-sm text-slate-400 mt-1">Gestão simplificada de itens e produtos - OrC Brasil</p>
+            <p className="text-sm text-slate-400 mt-1">Gestão de Insumos e Produtos Finalizados - OrC Brasil</p>
           </div>
 
           <div className="flex flex-wrap gap-2">
             <button
               onClick={() => router.push('/vendas')}
-              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold rounded-xl border border-slate-700 transition-colors cursor-pointer"
+              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold rounded-xl border border-slate-700 transition-colors cursor-pointer flex items-center gap-2"
             >
-              Histórico de Vendas
+              <span>🕒</span> Histórico de Vendas
             </button>
             <button
               onClick={() => router.push('/movimentacoes')}
-              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold rounded-xl border border-slate-700 transition-colors cursor-pointer"
+              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold rounded-xl border border-slate-700 transition-colors cursor-pointer flex items-center gap-2"
             >
-              Movimentações
+              <span>📋</span> Movimentações
             </button>
             <button
-              onClick={() => router.push('/estoque/entrada')}
-              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold rounded-xl border border-slate-700 transition-colors cursor-pointer"
+              onClick={() => router.push('/movimentar')}
+              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold rounded-xl border border-slate-700 transition-colors cursor-pointer flex items-center gap-2"
             >
-              Lançar Entrada
+              <span>📦</span> Lançar Entrada
             </button>
             <button
               onClick={() => router.push('/vendas/lancar')}
-              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-xl shadow-lg transition-colors cursor-pointer"
+              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-xl shadow-lg transition-colors cursor-pointer flex items-center gap-2"
             >
-              + Nova Venda
+              <span>➕</span> Nova Venda
             </button>
           </div>
         </div>
@@ -101,14 +152,19 @@ export default function EstoquePage() {
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1.5 uppercase tracking-wider">Categoria / Tipo</label>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5 uppercase tracking-wider">Classificação / Tipo</label>
             <select
               value={categoriaFiltro}
               onChange={(e) => setCategoriaFiltro(e.target.value)}
               className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
             >
-              <option value="TODAS">Todas as Categorias</option>
+              <option value="TODAS">Todas as Classificações</option>
+              <option value="PRODUTO FINALIZADO">Produto Finalizado</option>
+              <option value="INSUMO">Insumo (Matéria-Prima)</option>
+              <option value="ALMOXARIFADO">Almoxarifado (Consumo Interno)</option>
               <option value="EMBALAGEM">Embalagem</option>
+              <option value="EPI">EPI</option>
+              <option value="SEM_CATEGORIA">⚠️ Sem Classificação</option>
             </select>
           </div>
 
@@ -120,6 +176,8 @@ export default function EstoquePage() {
               className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
             >
               <option value="TODOS">Todos os Status</option>
+              <option value="DISPONIVEL">Em Estoque (&gt; 0)</option>
+              <option value="ZERADO">Zerado (0)</option>
             </select>
           </div>
         </div>
@@ -131,7 +189,7 @@ export default function EstoquePage() {
               <thead>
                 <tr className="border-b border-slate-800 text-xs font-bold text-slate-400 uppercase tracking-wider">
                   <th className="p-4 sm:p-5">Nome do Item</th>
-                  <th className="p-4 sm:p-5">Categoria / Tipo</th>
+                  <th className="p-4 sm:p-5">Classificação</th>
                   <th className="p-4 sm:p-5 text-right">Estoque Atual</th>
                 </tr>
               </thead>
@@ -149,19 +207,23 @@ export default function EstoquePage() {
                     </td>
                   </tr>
                 ) : (
-                  produtosFiltrados.map((p) => (
-                    <tr key={p.id} className="hover:bg-slate-800/40 transition-colors">
-                      <td className="p-4 sm:p-5 font-semibold text-slate-100">{p.nome}</td>
-                      <td className="p-4 sm:p-5">
-                        <span className="px-3 py-1 bg-amber-950/60 text-amber-500 border border-amber-800/40 rounded-lg text-xs font-bold uppercase tracking-wide">
-                          {p.categoria || 'EMBALAGEM'}
-                        </span>
-                      </td>
-                      <td className="p-4 sm:p-5 text-right font-extrabold text-emerald-400">
-                        {p.estoque_atual} un
-                      </td>
-                    </tr>
-                  ))
+                  produtosFiltrados.map((p) => {
+                    const rotuloExibicao = formatarRotulo(p.categoria, p.tipo);
+                    const estiloCor = obterEstiloRotulo(p.categoria, p.tipo);
+                    return (
+                      <tr key={p.id} className="hover:bg-slate-800/40 transition-colors">
+                        <td className="p-4 sm:p-5 font-semibold text-slate-100">{p.nome}</td>
+                        <td className="p-4 sm:p-5">
+                          <span className={`px-3 py-1 border rounded-lg text-xs font-bold uppercase tracking-wide ${estiloCor}`}>
+                            {rotuloExibicao}
+                          </span>
+                        </td>
+                        <td className="p-4 sm:p-5 text-right font-extrabold text-emerald-400">
+                          {p.estoque_atual} un
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

@@ -38,6 +38,7 @@ export default function MovimentacoesEstoquePage() {
       setCarregando(true);
       setErro(null);
 
+      // Dupla ordenação: created_at + id descendentes para garantir estabilidade sequencial absoluta
       const { data, error } = await supabase
         .from('movimentacoes_estoque')
         .select(`
@@ -46,27 +47,20 @@ export default function MovimentacoesEstoquePage() {
           tipo,
           quantidade,
           observacao,
+          created_at,
           produtos (
             id,
             nome,
             estoque_atual
           )
         `)
+        .order('created_at', { ascending: false })
         .order('id', { ascending: false });
 
       if (error) throw error;
 
       if (data) {
-        const movsOrdenadas = data.sort((a, b) => {
-          const getData = (obs?: string) => {
-            if (!obs) return '0000-00-00';
-            const match = obs.match(/\[Data:\s*([\d-]+)\]/);
-            return match ? match[1] : '0000-00-00';
-          };
-          return getData(b.observacao).localeCompare(getData(a.observacao));
-        });
-
-        setMovimentacoes(movsOrdenadas);
+        setMovimentacoes(data);
       }
     } catch (err: any) {
       setErro(err?.message || 'Erro ao carregar movimentações de estoque.');
@@ -149,12 +143,20 @@ export default function MovimentacoesEstoquePage() {
     let dataStr = '—';
     let obsLimpa = mov.observacao || '—';
 
+    if (mov.created_at) {
+      dataIso = mov.created_at.split('T')[0];
+      const [ano, mes, dia] = dataIso.split('-');
+      dataStr = `${dia}/${mes}/${ano}`;
+    }
+
     if (mov.observacao) {
       const match = mov.observacao.match(/\[Data:\s*([\d-]+)\]/);
       if (match) {
-        dataIso = match[1];
-        const [ano, mes, dia] = dataIso.split('-');
-        dataStr = `${dia}/${mes}/${ano}`;
+        if (!mov.created_at) {
+          dataIso = match[1];
+          const [ano, mes, dia] = dataIso.split('-');
+          dataStr = `${dia}/${mes}/${ano}`;
+        }
         obsLimpa = mov.observacao.replace(/\[Data:\s*[\d-]+\]/, '').trim();
       }
     }
