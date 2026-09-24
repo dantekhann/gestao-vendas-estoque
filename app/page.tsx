@@ -17,11 +17,22 @@ interface Produto {
   estoque_atual: number;
 }
 
-// Função para traduzir e formalizar a categoria/tipo conforme a regra de negócio
-function formatarRotulo(cat: string | null | undefined, tipo: string | null | undefined) {
+// Função para traduzir, formalizar e forçar EPI para itens de proteção pelo nome
+function formatarRotulo(cat: string | null | undefined, tipo: string | null | undefined, nomeProduto: string = '') {
   const valor = (tipo || cat || '').toUpperCase().trim();
+  const nome = nomeProduto.toUpperCase().trim();
 
-  if (valor.includes('EPI')) return 'EPI';
+  // Forçar identificação como EPI para itens de proteção específicos
+  if (
+    nome.includes('LUVA') || 
+    nome.includes('MÁSCARA') || 
+    nome.includes('PROPÉ') || 
+    nome.includes('TOUCA') ||
+    valor.includes('EPI')
+  ) {
+    return 'EPI';
+  }
+
   if (valor.includes('MATERIA') || valor.includes('INSUMO')) return 'INSUMO';
   if (valor.includes('CONSUMO') || valor.includes('ALMOXARIFADO')) return 'ALMOXARIFADO';
   if (valor.includes('EMBALAGEM')) return 'EMBALAGEM';
@@ -31,26 +42,25 @@ function formatarRotulo(cat: string | null | undefined, tipo: string | null | un
   return valor.replace(/_/g, ' ');
 }
 
-// Cores personalizadas e distintas para cada classificação
-function obterEstiloRotulo(cat: string | null | undefined, tipo: string | null | undefined) {
-  const rotulo = formatarRotulo(cat, tipo);
+// Cores personalizadas e distintas para cada classificação (com Produto Finalizado em Dourado #D4AF37)
+function obterEstiloRotulo(cat: string | null | undefined, tipo: string | null | undefined, nomeProduto: string = '') {
+  const rotulo = formatarRotulo(cat, tipo, nomeProduto);
   
   switch (rotulo) {
     case 'EPI':
-      return 'bg-emerald-950/60 text-emerald-400 border-emerald-800/40';
+      return 'bg-emerald-950/65 text-emerald-400 border-emerald-800/40';
     case 'INSUMO':
-      return 'bg-blue-950/60 text-blue-400 border-blue-800/40';
+      return 'bg-blue-950/65 text-blue-400 border-blue-800/40';
     case 'ALMOXARIFADO':
-      return 'bg-purple-950/60 text-purple-400 border-purple-800/40';
+      return 'bg-purple-950/65 text-purple-400 border-purple-800/40';
     case 'EMBALAGEM':
-      return 'bg-amber-950/60 text-amber-400 border-amber-800/40';
+      return 'bg-amber-950/65 text-amber-400 border-amber-800/40';
     case 'PRODUTO FINALIZADO':
-      return 'bg-rose-950/60 text-rose-400 border-rose-800/40';
+      return 'bg-[#D4AF37]/15 text-[#D4AF37] border-[#D4AF37]/40';
     default:
       return 'bg-slate-800 text-slate-400 border-slate-700';
   }
 }
-
 export default function EstoquePage() {
   const router = useRouter();
   const [produtos, setProdutos] = useState<Produto[]>([]);
@@ -78,7 +88,7 @@ export default function EstoquePage() {
   }, []);
 
   const produtosFiltrados = produtos.filter((p) => {
-    const rotuloAtual = formatarRotulo(p.categoria, p.tipo);
+    const rotuloAtual = formatarRotulo(p.categoria, p.tipo, p.nome);
 
     const matchNome = p.nome.toLowerCase().includes(busca.toLowerCase());
     
@@ -208,8 +218,8 @@ export default function EstoquePage() {
                   </tr>
                 ) : (
                   produtosFiltrados.map((p) => {
-                    const rotuloExibicao = formatarRotulo(p.categoria, p.tipo);
-                    const estiloCor = obterEstiloRotulo(p.categoria, p.tipo);
+                    const rotuloExibicao = formatarRotulo(p.categoria, p.tipo, p.nome);
+                    const estiloCor = obterEstiloRotulo(p.categoria, p.tipo, p.nome);
                     return (
                       <tr key={p.id} className="hover:bg-slate-800/40 transition-colors">
                         <td className="p-4 sm:p-5 font-semibold text-slate-100">{p.nome}</td>

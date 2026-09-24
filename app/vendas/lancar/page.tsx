@@ -12,6 +12,8 @@ const supabase = createClient(
 interface Produto {
   id: string;
   nome: string;
+  categoria?: string | null;
+  tipo?: string | null;
   preco_venda: number;
   estoque_atual: number;
 }
@@ -22,6 +24,29 @@ interface ItemVenda {
   quantidade: number;
   preco_unitario: number;
   subtotal: number;
+}
+
+// Função para identificar se o item é Produto Finalizado
+function formatarRotulo(cat: string | null | undefined, tipo: string | null | undefined, nomeProduto: string = '') {
+  const valor = (tipo || cat || '').toUpperCase().trim();
+  const nome = nomeProduto.toUpperCase().trim();
+
+  if (
+    nome.includes('LUVA') || 
+    nome.includes('MÁSCARA') || 
+    nome.includes('PROPÉ') || 
+    nome.includes('TOUCA') ||
+    valor.includes('EPI')
+  ) {
+    return 'EPI';
+  }
+
+  if (valor.includes('MATERIA') || valor.includes('INSUMO')) return 'INSUMO';
+  if (valor.includes('CONSUMO') || valor.includes('ALMOXARIFADO')) return 'ALMOXARIFADO';
+  if (valor.includes('EMBALAGEM')) return 'EMBALAGEM';
+  if (valor.includes('ACABADO') || valor.includes('PRODUTO')) return 'PRODUTO FINALIZADO';
+  
+  return valor.replace(/_/g, ' ');
 }
 
 const LISTA_CLIENTES = [
@@ -129,11 +154,17 @@ export default function NovaVendaPage() {
         setCarregando(true);
         const { data, error } = await supabase
           .from('produtos')
-          .select('id, nome, preco_venda, estoque_atual')
+          .select('id, nome, categoria, tipo, preco_venda, estoque_atual')
           .order('nome', { ascending: true });
 
         if (error) throw error;
-        if (data) setProdutos(data);
+        if (data) {
+          // Filtrar apenas produtos finalizados para a venda
+          const apenasFinalizados = data.filter(
+            (p) => formatarRotulo(p.categoria, p.tipo, p.nome) === 'PRODUTO FINALIZADO'
+          );
+          setProdutos(apenasFinalizados);
+        }
       } catch (err: unknown) {
         const errObj = err as Record<string, any>;
         const mensagem = errObj?.message || errObj?.details || 'Erro ao carregar produtos.';
@@ -369,7 +400,7 @@ export default function NovaVendaPage() {
           </div>
 
           <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-3">
-            <h2 className="text-xs font-semibold tracking-wide text-slate-400 uppercase">2. Seleção de Produtos</h2>
+            <h2 className="text-xs font-semibold tracking-wide text-slate-400 uppercase">2. Seleção de Produtos (Apenas Finalizados)</h2>
             
             <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
               <div className="sm:col-span-6">
