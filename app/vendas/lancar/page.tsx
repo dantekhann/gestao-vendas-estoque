@@ -26,7 +26,6 @@ interface ItemVenda {
   subtotal: number;
 }
 
-// Função para identificar se o item é Produto Finalizado
 function formatarRotulo(cat: string | null | undefined, tipo: string | null | undefined, nomeProduto: string = '') {
   const valor = (tipo || cat || '').toUpperCase().trim();
   const nome = nomeProduto.toUpperCase().trim();
@@ -165,9 +164,8 @@ export default function NovaVendaPage() {
           setProdutos(apenasFinalizados);
         }
       } catch (err: unknown) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const errObj = err as Record<string, any>;
-        const mensagem = errObj?.message || errObj?.details || 'Erro ao carregar produtos.';
+        const errObj = err as Record<string, unknown>;
+        const mensagem = (errObj?.message as string) || (errObj?.details as string) || 'Erro ao carregar produtos.';
         setErro(mensagem);
       } finally {
         setCarregando(false);
@@ -291,7 +289,14 @@ export default function NovaVendaPage() {
       setSalvando(true);
       setErro(null);
 
-      // 1. Registar a venda principal
+      const resumoProdutos = itens
+        .map((i) => `${i.quantidade}x ${i.nome}`)
+        .join(', ');
+      
+      const observacaoFinal = observacoes.trim() !== '' 
+        ? `${resumoProdutos} | Obs: ${observacoes.trim()}` 
+        : resumoProdutos;
+
       const { data: vendaData, error: vendaError } = await supabase
         .from('vendas')
         .insert([
@@ -299,7 +304,7 @@ export default function NovaVendaPage() {
             cliente,
             forma_pagamento: formaPagamento,
             valor_total: totalFinal,
-            observacao: observacoes,
+            observacao: observacaoFinal,
             created_at: `${dataVenda}T12:00:00.000Z`,
           },
         ])
@@ -309,9 +314,7 @@ export default function NovaVendaPage() {
       if (vendaError) throw vendaError;
       const vendaId = vendaData.id;
 
-      // 2. Processar cada item da venda
       for (const item of itens) {
-        // Guardar item da venda
         const { error: itemError } = await supabase.from('itens_venda').insert([
           {
             venda_id: vendaId,
@@ -323,7 +326,6 @@ export default function NovaVendaPage() {
         ]);
         if (itemError) throw itemError;
 
-        // Atualizar estoque atual do produto
         const produtoOriginal = produtos.find((p) => p.id === item.produto_id);
         const estoqueAtual = produtoOriginal ? produtoOriginal.estoque_atual : 0;
         const novoEstoque = Math.max(0, estoqueAtual - item.quantidade);
@@ -335,7 +337,6 @@ export default function NovaVendaPage() {
 
         if (prodError) throw prodError;
 
-        // Registar explicitamente na tabela de movimentações com tipo VENDA
         const { error: movError } = await supabase.from('movimentacoes').insert([
           {
             produto_id: item.produto_id,
@@ -351,18 +352,17 @@ export default function NovaVendaPage() {
         }
       }
 
-      alert('Venda registada e lançada nas movimentações de estoque com sucesso!');
+      alert('Venda registada e lançada com sucesso!');
       router.push('/vendas');
       router.refresh();
     } catch (err: unknown) {
       console.error("Erro completo:", err);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const errObj = err as Record<string, any>;
+      const errObj = err as Record<string, unknown>;
       
       const mensagemDetalhada = 
-        errObj?.message || 
-        errObj?.error_description || 
-        errObj?.details || 
+        (errObj?.message as string) || 
+        (errObj?.error_description as string) || 
+        (errObj?.details as string) || 
         JSON.stringify(errObj, null, 2);
         
       setErro(mensagemDetalhada);
@@ -392,7 +392,7 @@ export default function NovaVendaPage() {
 
         <form onSubmit={handleSubmit} className="space-y-6">
           {erro && (
-            <div className="p-4 border border-red-500/30 bg-red-950/50 text-red-400 rounded-lg text-sm wrap-break-word whitespace-pre-wrap">
+            <div className="p-4 border border-red-500/30 bg-red-950/50 text-red-400 rounded-lg text-sm whitespace-pre-wrap">
               <strong>Erro ao registar a venda:</strong>
               <br />
               {erro}
@@ -583,7 +583,7 @@ export default function NovaVendaPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1">Observações</label>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Observações Adicionais</label>
               <textarea
                 rows={2}
                 placeholder="Observações do pedido..."

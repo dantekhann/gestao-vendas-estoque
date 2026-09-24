@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 
@@ -35,7 +35,7 @@ export default function HistoricoVendasPage() {
   const [editData, setEditData] = useState<string>('');
   const [salvando, setSalvando] = useState<boolean>(false);
 
-  async function carregarVendas() {
+  const carregarVendas = useCallback(async () => {
     try {
       setCarregando(true);
       setErro(null);
@@ -47,16 +47,28 @@ export default function HistoricoVendasPage() {
 
       if (error) throw error;
       if (data) setVendas(data);
-    } catch (err: any) {
-      setErro(err?.message || 'Erro ao carregar histórico de vendas.');
+    } catch (err: unknown) {
+      const errorObj = err as { message?: string };
+      setErro(errorObj?.message || 'Erro ao carregar histórico de vendas.');
     } finally {
       setCarregando(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
-    carregarVendas();
-  }, []);
+    let isMounted = true;
+
+    async function init() {
+      if (isMounted) {
+        await carregarVendas();
+      }
+    }
+    init();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [carregarVendas]);
 
   const abrirModalEdicao = (venda: Venda) => {
     setVendaEditando(venda);
@@ -81,7 +93,13 @@ export default function HistoricoVendasPage() {
     try {
       setSalvando(true);
 
-      const dadosAtualizados: any = {
+      const dadosAtualizados: {
+        cliente: string;
+        forma_pagamento: string;
+        valor_total: number;
+        observacao: string;
+        created_at?: string;
+      } = {
         cliente: editCliente,
         forma_pagamento: editFormaPgto,
         valor_total: Number(editValorTotal),
@@ -111,9 +129,10 @@ export default function HistoricoVendasPage() {
       setModalAberto(false);
       setVendaEditando(null);
       alert('Venda atualizada com sucesso!');
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errorObj = err as { message?: string };
       console.error('Erro ao atualizar venda:', err);
-      alert(`Erro ao atualizar: ${err.message || 'Erro desconhecido'}`);
+      alert(`Erro ao atualizar: ${errorObj.message || 'Erro desconhecido'}`);
     } finally {
       setSalvando(false);
     }
@@ -127,8 +146,9 @@ export default function HistoricoVendasPage() {
       if (error) throw error;
 
       setVendas((prev) => prev.filter((v) => v.id !== id));
-    } catch (err: any) {
-      alert(`Erro ao excluir venda: ${err.message}`);
+    } catch (err: unknown) {
+      const errorObj = err as { message?: string };
+      alert(`Erro ao excluir venda: ${errorObj.message}`);
     }
   };
 
@@ -163,7 +183,6 @@ export default function HistoricoVendasPage() {
     return bateBusca && bateCliente && bateFormaPgto && bateDataInicio && bateDataFim;
   });
 
-  // Correção aplicada aqui (type guard explícito para string[])
   const clientesUnicos: string[] = Array.from(
     new Set(vendas.map((v) => v.cliente).filter((c): c is string => typeof c === 'string' && c.trim() !== ''))
   );
@@ -278,7 +297,7 @@ export default function HistoricoVendasPage() {
                     <th className="p-3.5">Data</th>
                     <th className="p-3.5">Cliente</th>
                     <th className="p-3.5">Forma Pgto</th>
-                    <th className="p-3.5">Observação</th>
+                    <th className="p-3.5">Observação (Produtos / Quantidades)</th>
                     <th className="p-3.5">Valor Total</th>
                     <th className="p-3.5 text-center">Ações</th>
                   </tr>
@@ -304,8 +323,8 @@ export default function HistoricoVendasPage() {
                             {v.forma_pagamento || 'PIX'}
                           </span>
                         </td>
-                        <td className="p-3.5 text-slate-400 text-sm">
-                          {v.observacao || '—'}
+                        <td className="p-3.5 text-slate-300 text-sm whitespace-pre-line">
+                          {v.observacao && v.observacao.trim() !== '' ? v.observacao : '—'}
                         </td>
                         <td className="p-3.5 font-bold text-emerald-400">
                           R$ {Number(v.valor_total || 0).toFixed(2)}
@@ -409,7 +428,7 @@ export default function HistoricoVendasPage() {
 
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                  Observação
+                  Observação (Produtos / Quantidades)
                 </label>
                 <textarea
                   rows={3}
