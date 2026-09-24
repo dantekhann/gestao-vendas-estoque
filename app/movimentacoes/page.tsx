@@ -13,12 +13,13 @@ interface Produto {
 interface Movimentacao {
   id: string;
   produto_id?: string;
-  tipo: 'ENTRADA' | 'SAIDA' | 'AJUSTE';
+  tipo: 'ENTRADA' | 'SAIDA' | 'AJUSTE' | 'VENDA';
   quantidade: number;
   observacao?: string;
   created_at?: string;
   produtos?: Produto | Produto[] | null;
   produto_nome?: string;
+  tabelaOrigem: 'movimentacoes' | 'movimentacoes_estoque';
 }
 
 export default function MovimentacoesEstoquePage() {
@@ -38,8 +39,25 @@ export default function MovimentacoesEstoquePage() {
       setCarregando(true);
       setErro(null);
 
-      // Dupla ordenação: created_at + id descendentes para garantir estabilidade sequencial absoluta
-      const { data, error } = await supabase
+      // Consulta 1: Vendas na tabela 'movimentacoes'
+      const promVendas = supabase
+        .from('movimentacoes')
+        .select(`
+          id,
+          produto_id,
+          tipo,
+          quantidade,
+          observacao,
+          created_at,
+          produtos (
+            id,
+            nome,
+            estoque_atual
+          )
+        `);
+
+      // Consulta 2: Entradas, Saídas e Ajustes na tabela 'movimentacoes_estoque'
+      const promOutras = supabase
         .from('movimentacoes_estoque')
         .select(`
           id,
@@ -53,15 +71,36 @@ export default function MovimentacoesEstoquePage() {
             nome,
             estoque_atual
           )
-        `)
-        .order('created_at', { ascending: false })
-        .order('id', { ascending: false });
+        `);
 
-      if (error) throw error;
+      const [resVendas, resOutras] = await Promise.all([promVendas, promOutras]);
 
-      if (data) {
-        setMovimentacoes(data);
-      }
+      if (resVendas.error) throw resVendas.error;
+      if (resOutras.error) throw resOutras.error;
+
+      // Mapear identificando a tabela de origem para facilitar a exclusão
+      const listaVendas: Movimentacao[] = (resVendas.data || []).map((item) => ({
+        ...item,
+        tabelaOrigem: 'movimentacoes',
+      }));
+
+      const listaOutras: Movimentacao[] = (resOutras.data || []).map((item) => ({
+        ...item,
+        tabelaOrigem: 'movimentacoes_estoque',
+      }));
+
+      // Unir as duas listas
+      const combinadas = [...listaVendas, ...listaOutras];
+
+      // Ordenar da mais recente para a mais antiga por created_at
+      combinadas.sort((a, b) => {
+        const dataA = new Date(a.created_at || 0).getTime();
+        const dataB = new Date(b.created_at || 0).getTime();
+        if (dataB !== dataA) return dataB - dataA;
+        return String(b.id).localeCompare(String(a.id));
+      });
+
+      setMovimentacoes(combinadas);
     } catch (err: any) {
       setErro(err?.message || 'Erro ao carregar movimentações de estoque.');
     } finally {
@@ -110,8 +149,8 @@ export default function MovimentacoesEstoquePage() {
 
           if (mov.tipo === 'ENTRADA') {
             novoEstoque -= mov.quantidade;
-          } else if (mov.tipo === 'SAIDA') {
-            novoEstoque += mov.quantidade;
+          } else if (mov.tipo === 'SAIDA' || mov.tipo === 'VENDA') {
+            novoEstoque += mov.quantidade; 
           }
 
           await supabase
@@ -121,8 +160,9 @@ export default function MovimentacoesEstoquePage() {
         }
       }
 
+      // Excluir da tabela correta onde o registo estava guardado
       const { error: deleteErr } = await supabase
-        .from('movimentacoes_estoque')
+        .from(mov.tabelaOrigem)
         .delete()
         .eq('id', mov.id);
 
@@ -188,7 +228,7 @@ export default function MovimentacoesEstoquePage() {
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900 p-5 rounded-xl border border-slate-800 shadow-md">
           <div>
             <h1 className="text-2xl font-bold text-white">Histórico de Movimentações</h1>
-            <p className="text-sm text-slate-400">Auditoria de entradas e saídas de estoque - OrC Brasil</p>
+            <p className="text-sm text-slate-400">Auditoria de entradas, saídas e vendas de estoque - OrC Brasil</p>
           </div>
           <div className="flex items-center gap-3 w-full sm:w-auto">
             <Link
@@ -234,6 +274,7 @@ export default function MovimentacoesEstoquePage() {
                   <option value="">Todos os Tipos</option>
                   <option value="ENTRADA">Entrada</option>
                   <option value="SAIDA">Saída</option>
+                  <option value="VENDA">Venda</option>
                   <option value="AJUSTE">Ajuste</option>
                 </select>
               </div>
@@ -315,10 +356,12 @@ export default function MovimentacoesEstoquePage() {
                           ? 'bg-emerald-950/60 border-emerald-800/60 text-emerald-400'
                           : mov.tipo === 'SAIDA'
                           ? 'bg-red-950/60 border-red-800/60 text-red-400'
+                          : mov.tipo === 'VENDA'
+                          ? 'bg-purple-950/60 border-purple-800/60 text-purple-400'
                           : 'bg-amber-950/60 border-amber-800/60 text-amber-400';
 
                       return (
-                        <tr key={mov.id} className="hover:bg-slate-800/40 transition-colors">
+                        <tr key={`${mov.tabelaOrigem}-${mov.id}`} className="hover:bg-slate-800/40 transition-colors">
                           <td className="p-3.5 text-sm font-medium text-slate-300 whitespace-nowrap">
                             {dataStr}
                           </td>
