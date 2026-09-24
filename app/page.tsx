@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@supabase/supabase-js';
 
@@ -12,225 +12,160 @@ const supabase = createClient(
 interface Produto {
   id: string;
   nome: string;
-  estoque_atual: number;
-  tipo?: string;
   categoria?: string;
+  estoque_atual: number;
 }
 
-export default function DashboardPage() {
+export default function EstoquePage() {
   const router = useRouter();
-  
   const [produtos, setProdutos] = useState<Produto[]>([]);
-  const [carregando, setCarregando] = useState<boolean>(true);
-  const [erro, setErro] = useState<string | null>(null);
-
-  // Estados dos Filtros originais
-  const [buscaNome, setBuscaNome] = useState<string>('');
-  const [filtroCategoria, setFiltroCategoria] = useState<string>('TODAS');
-  const [filtroEstoque, setFiltroEstoque] = useState<string>('TODOS');
-
-  const formatarTipo = (tipoOrCat: string) => {
-    if (!tipoOrCat) return 'Produto Final';
-    return tipoOrCat.replace(/_/g, ' ');
-  };
+  const [busca, setBusca] = useState('');
+  const [categoriaFiltro, setCategoriaFiltro] = useState('TODAS');
+  const [statusFiltro, setStatusFiltro] = useState('TODOS');
+  const [carregando, setCarregando] = useState(true);
 
   useEffect(() => {
-    let montado = true;
-
-    async function carregarProdutos() {
+    async function carregarEstoque() {
       try {
-        setCarregando(true);
-        setErro(null);
-
         const { data, error } = await supabase
           .from('produtos')
           .select('*')
-          .order('estoque_atual', { ascending: false });
-
+          .order('nome', { ascending: true });
         if (error) throw error;
-
-        if (montado && data) {
-          setProdutos(data);
-        }
-      } catch (err: any) {
+        if (data) setProdutos(data);
+      } catch (err) {
         console.error('Erro ao carregar estoque:', err);
-        if (montado) {
-          setErro(err.message || 'Erro ao conectar com o banco de dados.');
-        }
       } finally {
-        if (montado) {
-          setCarregando(false);
-        }
+        setCarregando(false);
       }
     }
-
-    carregarProdutos();
-
-    return () => {
-      montado = false;
-    };
+    carregarEstoque();
   }, []);
 
-  const categoriasUnicas = useMemo(() => {
-    const tipos = produtos.map((p) => p.tipo || p.categoria).filter(Boolean);
-    return Array.from(new Set(tipos));
-  }, [produtos]);
-
-  const produtosFiltrados = useMemo(() => {
-    return produtos.filter((produto) => {
-      const campoCategoria = produto.tipo || produto.categoria || '';
-      const bateuNome = produto.nome.toLowerCase().includes(buscaNome.toLowerCase());
-      const bateuCategoria = filtroCategoria === 'TODAS' || campoCategoria === filtroCategoria;
-
-      let bateuEstoque = true;
-      if (filtroEstoque === 'DISPONIVEL') {
-        bateuEstoque = produto.estoque_atual > 0;
-      } else if (filtroEstoque === 'ESGOTADO') {
-        bateuEstoque = produto.estoque_atual <= 0;
-      }
-
-      return bateuNome && bateuCategoria && bateuEstoque;
-    });
-  }, [produtos, buscaNome, filtroCategoria, filtroEstoque]);
+  const produtosFiltrados = produtos.filter((p) => {
+    const matchNome = p.nome.toLowerCase().includes(busca.toLowerCase());
+    const matchCat = categoriaFiltro === 'TODAS' || p.categoria === categoriaFiltro;
+    return matchNome && matchCat;
+  });
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-6">
-      <div className="max-w-6xl mx-auto space-y-6">
+    <div className="min-h-screen bg-slate-950 text-slate-100 p-4 sm:p-8">
+      <div className="max-w-7xl mx-auto space-y-6">
         
-        {/* Cabeçalho com TODAS as funcionalidades e botões originais */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-900 p-5 rounded-xl border border-slate-800 shadow-md">
+        {/* Cabeçalho */}
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-xl gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-white">Situação de Estoque</h1>
-            <p className="text-sm text-slate-400">Gestão simplificada de itens e produtos - OrC Brasil</p>
+            <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">Situação de Estoque</h1>
+            <p className="text-sm text-slate-400 mt-1">Gestão simplificada de itens e produtos - OrC Brasil</p>
           </div>
-          
-          <div className="flex flex-wrap items-center gap-3">
+
+          <div className="flex flex-wrap gap-2">
             <button
               onClick={() => router.push('/vendas')}
-              className="bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold px-4 py-2.5 rounded-lg border border-slate-700 shadow-sm transition-colors flex items-center gap-2 text-sm"
+              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold rounded-xl border border-slate-700 transition-colors cursor-pointer"
             >
-              <span>Histórico de Vendas</span>
+              Histórico de Vendas
             </button>
-
             <button
               onClick={() => router.push('/movimentacoes')}
-              className="bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold px-4 py-2.5 rounded-lg border border-slate-700 shadow-sm transition-colors flex items-center gap-2 text-sm"
+              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold rounded-xl border border-slate-700 transition-colors cursor-pointer"
             >
-              <span>Movimentações</span>
+              Movimentações
             </button>
-
             <button
-              onClick={() => router.push('/movimentar')}
-              className="bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold px-4 py-2.5 rounded-lg border border-slate-700 shadow-sm transition-colors flex items-center gap-2 text-sm"
+              onClick={() => router.push('/estoque/entrada')}
+              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold rounded-xl border border-slate-700 transition-colors cursor-pointer"
             >
-              <span>Lançar Entrada</span>
+              Lançar Entrada
             </button>
-
             <button
-              onClick={() => router.push('/vendas/nova')}
-              className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-2.5 rounded-lg shadow-sm transition-colors flex items-center gap-2 text-sm"
+              onClick={() => router.push('/vendas/lancar')}
+              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-xl shadow-lg transition-colors cursor-pointer"
             >
-              <span>+ Nova Venda</span>
-            </button>
-
-            <button
-              onClick={() => router.push('/estoque')}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-2.5 rounded-lg shadow-sm transition-colors flex items-center gap-2 text-sm"
-            >
-              <span>📦 Inventário Completo</span>
+              + Nova Venda
             </button>
           </div>
         </div>
 
-        {/* Barra de Filtros */}
-        <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 shadow-md grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {/* Filtros */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-900 p-5 rounded-2xl border border-slate-800 shadow-lg">
           <div>
-            <label className="block text-xs font-semibold text-slate-400 mb-1">Buscar por Nome</label>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5 uppercase tracking-wider">Buscar por Nome</label>
             <input
               type="text"
-              value={buscaNome}
-              onChange={(e) => setBuscaNome(e.target.value)}
               placeholder="Digite para pesquisar..."
-              className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+              className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-400 mb-1">Categoria / Tipo</label>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5 uppercase tracking-wider">Categoria / Tipo</label>
             <select
-              value={filtroCategoria}
-              onChange={(e) => setFiltroCategoria(e.target.value)}
-              className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+              value={categoriaFiltro}
+              onChange={(e) => setCategoriaFiltro(e.target.value)}
+              className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
             >
-              <option value="TODAS" className="bg-slate-900">Todas as Categorias</option>
-              {categoriasUnicas.map((cat) => (
-                <option key={cat} value={cat} className="bg-slate-900">{formatarTipo(cat)}</option>
-              ))}
+              <option value="TODAS">Todas as Categorias</option>
+              <option value="EMBALAGEM">Embalagem</option>
             </select>
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-400 mb-1">Situação do Estoque</label>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5 uppercase tracking-wider">Situação do Estoque</label>
             <select
-              value={filtroEstoque}
-              onChange={(e) => setFiltroEstoque(e.target.value)}
-              className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+              value={statusFiltro}
+              onChange={(e) => setStatusFiltro(e.target.value)}
+              className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
             >
-              <option value="TODOS" className="bg-slate-900">Todos os Status</option>
-              <option value="DISPONIVEL" className="bg-slate-900">Apenas Disponíveis (&gt; 0)</option>
-              <option value="ESGOTADO" className="bg-slate-900">Apenas Esgotados (≤ 0)</option>
+              <option value="TODOS">Todos os Status</option>
             </select>
           </div>
         </div>
 
-        {/* Tabela de Produtos */}
-        <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md">
-          {carregando ? (
-            <div className="p-8 text-center text-slate-400 animate-pulse font-medium">
-              Carregando produtos do banco de dados...
-            </div>
-          ) : erro ? (
-            <div className="p-4 border border-red-500/30 bg-red-950/50 text-red-400 rounded-lg text-sm">
-              {erro}
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-800 bg-slate-950/50 text-xs font-bold text-slate-400 uppercase tracking-wider">
-                    <th className="p-3.5">Nome do Item</th>
-                    <th className="p-3.5">Categoria / Tipo</th>
-                    <th className="p-3.5 text-right">Estoque Atual</th>
+        {/* Tabela de Estoque */}
+        <div className="bg-slate-900 rounded-2xl border border-slate-800 shadow-xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-800 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  <th className="p-4 sm:p-5">Nome do Item</th>
+                  <th className="p-4 sm:p-5">Categoria / Tipo</th>
+                  <th className="p-4 sm:p-5 text-right">Estoque Atual</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60 text-sm">
+                {carregando ? (
+                  <tr>
+                    <td colSpan={3} className="p-8 text-center text-slate-500">
+                      A carregar stock...
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60">
-                  {produtosFiltrados.length === 0 ? (
-                    <tr>
-                      <td colSpan={3} className="text-center p-6 text-slate-500 font-medium">
-                        Nenhum item encontrado com os filtros selecionados.
+                ) : produtosFiltrados.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="p-8 text-center text-slate-500">
+                      Nenhum produto encontrado.
+                    </td>
+                  </tr>
+                ) : (
+                  produtosFiltrados.map((p) => (
+                    <tr key={p.id} className="hover:bg-slate-800/40 transition-colors">
+                      <td className="p-4 sm:p-5 font-semibold text-slate-100">{p.nome}</td>
+                      <td className="p-4 sm:p-5">
+                        <span className="px-3 py-1 bg-amber-950/60 text-amber-500 border border-amber-800/40 rounded-lg text-xs font-bold uppercase tracking-wide">
+                          {p.categoria || 'EMBALAGEM'}
+                        </span>
+                      </td>
+                      <td className="p-4 sm:p-5 text-right font-extrabold text-emerald-400">
+                        {p.estoque_atual} un
                       </td>
                     </tr>
-                  ) : (
-                    produtosFiltrados.map((produto) => (
-                      <tr key={produto.id} className="hover:bg-slate-800/40 transition-colors">
-                        <td className="p-3.5 font-semibold text-slate-100">{produto.nome}</td>
-                        <td className="p-3.5 text-xs font-bold">
-                          <span className="px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700 inline-block">
-                            {formatarTipo(produto.tipo || produto.categoria || '')}
-                          </span>
-                        </td>
-                        <td className="p-3.5 text-right font-bold text-slate-100">
-                          <span className={produto.estoque_atual <= 0 ? 'text-red-400' : 'text-slate-100'}>
-                            {produto.estoque_atual} un
-                          </span>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
 
       </div>

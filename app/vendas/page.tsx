@@ -163,7 +163,10 @@ export default function HistoricoVendasPage() {
     return bateBusca && bateCliente && bateFormaPgto && bateDataInicio && bateDataFim;
   });
 
-  const clientesUnicos = Array.from(new Set(vendas.map((v) => v.cliente).filter(Boolean)));
+  // Correção aplicada aqui (type guard explícito para string[])
+  const clientesUnicos: string[] = Array.from(
+    new Set(vendas.map((v) => v.cliente).filter((c): c is string => typeof c === 'string' && c.trim() !== ''))
+  );
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 py-8 px-4 sm:px-6 lg:px-8">
@@ -176,7 +179,6 @@ export default function HistoricoVendasPage() {
             <p className="text-sm text-slate-400">Consulta de pedidos lançados - OrC Brasil</p>
           </div>
           <div className="flex items-center gap-3 w-full sm:w-auto">
-            {/* ATENÇÃO: Verifique se o seu ficheiro de lançamento está em app/vendas/lancar/page.tsx ou app/vendas/nova/page.tsx */}
             <Link
               href="/vendas/lancar"
               className="flex-1 sm:flex-none text-center px-4 py-2 text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors shadow-sm"
