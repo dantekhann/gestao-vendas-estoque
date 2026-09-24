@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { criarProduto } from './actions';
+import { criarProduto } from '../components/actions';
 import { useRouter } from 'next/navigation';
 
 interface Props {

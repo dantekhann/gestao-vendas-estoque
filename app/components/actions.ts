@@ -1,10 +1,13 @@
+'use server';
+
 import { createClient } from '@supabase/supabase-js';
+import { revalidatePath } from 'next/cache';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+);
 
-// Exportação global do cliente Supabase
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 export async function criarProduto(formData: FormData) {
   const nome = formData.get('nome') as string;
   const sku = formData.get('sku') as string;
@@ -48,6 +51,7 @@ export async function excluirProduto(id: string) {
 }
 
 export async function movimentarEstoque(produtoId: string, quantidade: number, tipo: 'entrada' | 'saida') {
+  // 1. Buscar estoque atual
   const { data: produto, error: errBusca } = await supabase
     .from('produtos')
     .select('estoque_atual')
@@ -61,6 +65,7 @@ export async function movimentarEstoque(produtoId: string, quantidade: number, t
   const estoqueAtual = Number(produto.estoque_atual) || 0;
   const novoEstoque = tipo === 'entrada' ? estoqueAtual + quantidade : estoqueAtual - quantidade;
 
+  // 2. Atualizar no banco
   const { error: errUpdate } = await supabase
     .from('produtos')
     .update({ estoque_atual: novoEstoque })

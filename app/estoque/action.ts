@@ -1,10 +1,8 @@
-import { createClient } from '@supabase/supabase-js';
+'use server';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+import { supabase } from '@/lib/supabase';
+import { revalidatePath } from 'next/cache';
 
-// Exportação global do cliente Supabase
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 export async function criarProduto(formData: FormData) {
   const nome = formData.get('nome') as string;
   const sku = formData.get('sku') as string;
@@ -15,15 +13,7 @@ export async function criarProduto(formData: FormData) {
   const categoria = formData.get('categoria') as string;
 
   const { error } = await supabase.from('produtos').insert([
-    {
-      nome,
-      sku,
-      preco_custo,
-      preco_venda,
-      estoque_atual,
-      estoque_minimo,
-      categoria,
-    },
+    { nome, sku, preco_custo, preco_venda, estoque_atual, estoque_minimo, categoria },
   ]);
 
   if (error) {

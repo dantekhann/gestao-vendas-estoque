@@ -17,10 +17,13 @@ interface Produto {
 }
 
 interface Props {
-  produtos: Produto[];
+  produtos?: Produto[];
 }
 
-export default function TabelaProdutos({ produtos }: Props) {
+export default function TabelaProdutos(props: Props) {
+  // Blindagem total contra props nulas ou indefinidas
+  const produtos = Array.isArray(props?.produtos) ? props.produtos : [];
+
   const router = useRouter();
   const [busca, setBusca] = useState('');
   const [filtroStatus, setFiltroStatus] = useState<'todos' | 'normal' | 'alerta'>('todos');

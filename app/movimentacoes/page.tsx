@@ -57,7 +57,6 @@ export default function MovimentacoesEstoquePage() {
       if (error) throw error;
 
       if (data) {
-        // Ordenação inteligente baseada na data extraída do campo [Data: YYYY-MM-DD] na observação
         const movsOrdenadas = data.sort((a, b) => {
           const getData = (obs?: string) => {
             if (!obs) return '0000-00-00';
@@ -80,7 +79,6 @@ export default function MovimentacoesEstoquePage() {
     carregarMovimentacoes();
   }, []);
 
-  // Função segura para extrair o nome do produto (seja objeto ou array vindo do Supabase)
   const getNomeProduto = (mov: Movimentacao) => {
     if (Array.isArray(mov.produtos)) {
       return mov.produtos[0]?.nome || mov.produto_nome || 'Produto não especificado';
@@ -91,7 +89,6 @@ export default function MovimentacoesEstoquePage() {
     return mov.produto_nome || 'Produto não especificado';
   };
 
-  // Função para excluir movimentação e reverter o estoque
   const handleExcluirMovimentacao = async (mov: Movimentacao) => {
     const nomeProd = getNomeProduto(mov);
     const confirmar = window.confirm(
@@ -108,7 +105,6 @@ export default function MovimentacoesEstoquePage() {
         (Array.isArray(mov.produtos) ? mov.produtos[0]?.id : (mov.produtos as Produto)?.id);
 
       if (produtoId) {
-        // Busca estoque atual do produto
         const { data: prodData } = await supabase
           .from('produtos')
           .select('estoque_atual')
@@ -118,8 +114,6 @@ export default function MovimentacoesEstoquePage() {
         if (prodData) {
           let novoEstoque = prodData.estoque_atual || 0;
 
-          // Se a movimentação excluída foi ENTRADA, removemos do estoque
-          // Se foi SAIDA, devolvemos ao estoque
           if (mov.tipo === 'ENTRADA') {
             novoEstoque -= mov.quantidade;
           } else if (mov.tipo === 'SAIDA') {
@@ -133,7 +127,6 @@ export default function MovimentacoesEstoquePage() {
         }
       }
 
-      // Apaga o registo da movimentação
       const { error: deleteErr } = await supabase
         .from('movimentacoes_estoque')
         .delete()
@@ -151,7 +144,6 @@ export default function MovimentacoesEstoquePage() {
     }
   };
 
-  // Formata a linha extraindo a data do padrão [Data: YYYY-MM-DD]
   const formatarLinhaMovimentacao = (mov: Movimentacao) => {
     let dataIso = '';
     let dataStr = '—';
@@ -170,7 +162,6 @@ export default function MovimentacoesEstoquePage() {
     return { dataIso, dataStr, obsLimpa: obsLimpa || '—' };
   };
 
-  // Filtragem avançada
   const movimentacoesFiltradas = movimentacoes.filter((mov) => {
     const nomeProd = getNomeProduto(mov).toLowerCase();
     const obs = (mov.observacao || '').toLowerCase();
@@ -199,11 +190,11 @@ export default function MovimentacoesEstoquePage() {
           </div>
           <div className="flex items-center gap-3 w-full sm:w-auto">
             <Link
-  href="/estoque/movimentar"
-  className="flex-1 sm:flex-none text-center px-4 py-2 text-sm font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors shadow-sm"
->
-  + Ajuste Manual
-</Link>
+              href="/movimentar"
+              className="flex-1 sm:flex-none text-center px-4 py-2 text-sm font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors shadow-sm"
+            >
+              + Nova Movimentação
+            </Link>
             <Link
               href="/"
               className="flex-1 sm:flex-none text-center px-4 py-2 text-sm font-medium bg-slate-800 text-slate-200 hover:bg-slate-700 rounded-lg transition-colors border border-slate-700"
@@ -220,7 +211,6 @@ export default function MovimentacoesEstoquePage() {
             <h2 className="text-lg font-semibold text-slate-200">Filtros de Pesquisa</h2>
             
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              
               <div>
                 <label className="block text-xs font-medium text-slate-400 mb-1">Buscar (Produto/Obs)</label>
                 <input
@@ -265,7 +255,6 @@ export default function MovimentacoesEstoquePage() {
                   className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
-
             </div>
 
             {(filtroBusca || filtroTipo || filtroDataInicio || filtroDataFim) && (
@@ -350,7 +339,7 @@ export default function MovimentacoesEstoquePage() {
                               onClick={() => handleExcluirMovimentacao(mov)}
                               disabled={estaExcluindo}
                               title="Excluir movimentação"
-                              className="px-2.5 py-1.5 bg-red-950/40 hover:bg-red-900/60 text-red-400 hover:text-red-300 border border-red-800/50 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50"
+                              className="px-2.5 py-1.5 bg-red-950/40 hover:bg-red-900/60 text-red-400 hover:text-red-300 border border-red-800/50 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 cursor-pointer"
                             >
                               {estaExcluindo ? 'A apagar...' : 'Excluir'}
                             </button>
