@@ -81,6 +81,7 @@ export default function EstoquePage() {
         const { data, error } = await supabase
           .from('produtos')
           .select('*')
+          .eq('ativo', true)
           .order('nome', { ascending: true });
         if (error) throw error;
         if (data) setProdutos(data);

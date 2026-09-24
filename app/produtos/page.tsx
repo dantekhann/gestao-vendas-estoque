@@ -11,6 +11,7 @@ interface Produto {
   preco_venda: number;
   estoque_atual: number;
   estoque_minimo?: number;
+  ativo?: boolean;
 }
 
 const OPCOES_CLASSIFICACAO = [
@@ -26,6 +27,7 @@ export default function ProdutosAdminPage() {
   const [carregando, setCarregando] = useState<boolean>(true);
   const [erro, setErro] = useState<string | null>(null);
   const [filtroBusca, setFiltroBusca] = useState<string>('');
+  const [filtroStatus, setFiltroStatus] = useState<string>('todos'); // 'todos', 'ativos', 'inativos'
 
   // Estados para Adicionar Novo Produto
   const [novoNome, setNovoNome] = useState<string>('');
@@ -64,8 +66,18 @@ export default function ProdutosAdminPage() {
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    carregarProdutos();
+    let isMounted = true;
+
+    async function init() {
+      if (isMounted) {
+        await carregarProdutos();
+      }
+    }
+    init();
+
+    return () => {
+      isMounted = false;
+    };
   }, [carregarProdutos]);
 
   const handleAdicionarProduto = async (e: React.FormEvent) => {
@@ -84,6 +96,7 @@ export default function ProdutosAdminPage() {
         preco_venda: parseFloat(novoPreco) || 0,
         estoque_atual: parseInt(novoEstoque) || 0,
         estoque_minimo: parseInt(novoEstoqueMinimo) || 0,
+        ativo: true,
       };
 
       const { error } = await supabase.from('produtos').insert([dadosParaEnviar]);
@@ -144,24 +157,38 @@ export default function ProdutosAdminPage() {
     }
   };
 
-  const handleExcluir = async (id: string, nome: string) => {
-    if (!window.confirm(`Tens a certeza que pretendes eliminar o produto "${nome}"?`)) return;
+  const handleAlternarStatus = async (prod: Produto) => {
+    const novoStatus = prod.ativo === false ? true : false;
+    const acaoStr = novoStatus ? 'reativar' : 'ocultar';
+
+    if (!window.confirm(`Tens a certeza que pretendes ${acaoStr} o produto "${prod.nome}"?`)) return;
 
     try {
-      const { error } = await supabase.from('produtos').delete().eq('id', id);
+      const { error } = await supabase
+        .from('produtos')
+        .update({ ativo: novoStatus })
+        .eq('id', prod.id);
+
       if (error) throw error;
 
-      setProdutos((prev) => prev.filter((p) => p.id !== id));
-      alert('Produto eliminado com sucesso!');
+      setProdutos((prev) =>
+        prev.map((p) => (p.id === prod.id ? { ...p, ativo: novoStatus } : p))
+      );
+      alert(`Produto ${novoStatus ? 'reativado' : 'ocultado'} com sucesso!`);
     } catch (err: unknown) {
       const errorObj = err as { message?: string };
-      alert(`Erro ao eliminar: ${errorObj.message}`);
+      alert(`Erro ao alterar status: ${errorObj.message}`);
     }
   };
 
-  const produtosFiltrados = produtos.filter((p) =>
-    p.nome.toLowerCase().includes(filtroBusca.toLowerCase().trim())
-  );
+  const produtosFiltrados = produtos.filter((p) => {
+    const bateBusca = p.nome.toLowerCase().includes(filtroBusca.toLowerCase().trim());
+    const isAtivo = p.ativo !== false; // Considera true se undefined
+
+    if (filtroStatus === 'ativos') return bateBusca && isAtivo;
+    if (filtroStatus === 'inativos') return bateBusca && !isAtivo;
+    return bateBusca; // 'todos'
+  });
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 py-8 px-4 sm:px-6 lg:px-8">
@@ -171,7 +198,7 @@ export default function ProdutosAdminPage() {
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900 p-5 rounded-xl border border-slate-800 shadow-md">
           <div>
             <h1 className="text-2xl font-bold text-white">Gestão de Produtos e Estoque</h1>
-            <p className="text-sm text-slate-400">Controle de catálogo, preços e limites mínimos de estoque - OrC Brasil</p>
+            <p className="text-sm text-slate-400">Controle de catálogo, preços e status - OrC Brasil</p>
           </div>
           <Link
             href="/"
@@ -247,19 +274,30 @@ export default function ProdutosAdminPage() {
           </form>
         </div>
 
-        {/* Catálogo Atual e Filtro */}
+        {/* Catálogo Atual e Filtros */}
         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-4">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
             <h2 className="text-lg font-semibold text-slate-200">
               Catálogo Atual ({produtos.length} itens)
             </h2>
-            <input
-              type="text"
-              placeholder="Filtrar por nome..."
-              value={filtroBusca}
-              onChange={(e) => setFiltroBusca(e.target.value)}
-              className="p-2 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500 w-full sm:w-64"
-            />
+            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+              <select
+                value={filtroStatus}
+                onChange={(e) => setFiltroStatus(e.target.value)}
+                className="p-2 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="ativos">Apenas Ativos (Visíveis nas Vendas)</option>
+                <option value="inativos">Apenas Ocultos/Inativos</option>
+                <option value="todos">Todos os Produtos</option>
+              </select>
+              <input
+                type="text"
+                placeholder="Filtrar por nome..."
+                value={filtroBusca}
+                onChange={(e) => setFiltroBusca(e.target.value)}
+                className="p-2 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500 w-full sm:w-52"
+              />
+            </div>
           </div>
 
           {carregando ? (
@@ -279,7 +317,7 @@ export default function ProdutosAdminPage() {
                     <th className="p-3.5">Classificação</th>
                     <th className="p-3.5">Preço (R$)</th>
                     <th className="p-3.5 text-center">Estoque Atual</th>
-                    <th className="p-3.5 text-center">Estoque Mínimo</th>
+                    <th className="p-3.5 text-center">Status</th>
                     <th className="p-3.5 text-center">Ações</th>
                   </tr>
                 </thead>
@@ -287,7 +325,7 @@ export default function ProdutosAdminPage() {
                   {produtosFiltrados.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="text-center p-8 text-slate-500 font-medium">
-                        Nenhum produto encontrado.
+                        Nenhum produto encontrado com os filtros atuais.
                       </td>
                     </tr>
                   ) : (
@@ -295,13 +333,13 @@ export default function ProdutosAdminPage() {
                       const estaEditando = editandoId === prod.id;
                       const atual = prod.estoque_atual ?? 0;
                       const minimo = prod.estoque_minimo ?? 0;
+                      const ativo = prod.ativo !== false;
 
-                      // Lógica de alerta visual para o estoquista
                       let badgeEstoqueClass = 'bg-emerald-950/60 text-emerald-400 border-emerald-800/40';
                       let statusTexto = `${atual} un`;
 
                       if (atual <= 0) {
-                        badgeEstoqueClass = 'bg-red-950/65 text-red-400 border-red-800/40 animate-pulse';
+                        badgeEstoqueClass = 'bg-red-950/65 text-red-400 border-red-800/40';
                         statusTexto = `${atual} un (Zerado)`;
                       } else if (atual <= minimo) {
                         badgeEstoqueClass = 'bg-amber-950/65 text-amber-400 border-amber-800/40';
@@ -309,7 +347,7 @@ export default function ProdutosAdminPage() {
                       }
 
                       return (
-                        <tr key={prod.id} className="hover:bg-slate-800/40 transition-colors">
+                        <tr key={prod.id} className={`hover:bg-slate-800/40 transition-colors ${!ativo ? 'opacity-50' : ''}`}>
                           {/* Nome */}
                           <td className="p-3.5 font-semibold text-slate-100">
                             {estaEditando ? (
@@ -358,7 +396,7 @@ export default function ProdutosAdminPage() {
                             )}
                           </td>
 
-                          {/* Estoque Atual com Alerta Visual */}
+                          {/* Estoque Atual */}
                           <td className="p-3.5 text-center">
                             {estaEditando ? (
                               <input
@@ -374,18 +412,11 @@ export default function ProdutosAdminPage() {
                             )}
                           </td>
 
-                          {/* Estoque Mínimo */}
-                          <td className="p-3.5 text-center text-slate-300">
-                            {estaEditando ? (
-                              <input
-                                type="number"
-                                value={editEstoqueMinimo}
-                                onChange={(e) => setEditEstoqueMinimo(e.target.value)}
-                                className="w-20 p-1.5 border border-blue-500 rounded bg-slate-950 text-white text-sm outline-none text-center mx-auto block"
-                              />
-                            ) : (
-                              `${prod.estoque_minimo ?? 0} un`
-                            )}
+                          {/* Status Ativo/Inativo */}
+                          <td className="p-3.5 text-center">
+                            <span className={`px-2 py-1 rounded text-xs font-bold ${ativo ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/50' : 'bg-slate-800 text-slate-400 border border-slate-700'}`}>
+                              {ativo ? 'Ativo' : 'Oculto'}
+                            </span>
                           </td>
 
                           {/* Ações */}
@@ -414,10 +445,10 @@ export default function ProdutosAdminPage() {
                                   Editar
                                 </button>
                                 <button
-                                  onClick={() => handleExcluir(prod.id, prod.nome)}
-                                  className="px-2.5 py-1.5 bg-red-950/40 hover:bg-red-900/60 text-red-400 hover:text-red-300 border border-red-800/50 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                                  onClick={() => handleAlternarStatus(prod)}
+                                  className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer border ${ativo ? 'bg-amber-950/40 hover:bg-amber-900/60 text-amber-400 border-amber-800/50' : 'bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-400 border-emerald-800/50'}`}
                                 >
-                                  Excluir
+                                  {ativo ? 'Ocultar' : 'Reativar'}
                                 </button>
                               </>
                             )}

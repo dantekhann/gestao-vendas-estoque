@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
@@ -27,8 +27,30 @@ export default function MovimentarEstoquePage() {
   
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  const carregarProdutos = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('produtos')
+        .select('id, nome, sku, estoque_atual')
+        .eq('ativo', true) // Filtra apenas os produtos ativos
+        .order('nome', { ascending: true });
+
+      if (error) throw error;
+      if (data) setProdutos(data);
+    } catch {
+      setErro('Erro ao carregar lista de produtos.');
+    }
+  }, []);
+
   useEffect(() => {
-    carregarProdutos();
+    let isMounted = true;
+
+    async function init() {
+      if (isMounted) {
+        await carregarProdutos();
+      }
+    }
+    init();
 
     function handleClickOutside(event: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -36,22 +58,12 @@ export default function MovimentarEstoquePage() {
       }
     }
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  async function carregarProdutos() {
-    try {
-      const { data, error } = await supabase
-        .from('produtos')
-        .select('id, nome, sku, estoque_atual')
-        .order('nome', { ascending: true });
-
-      if (error) throw error;
-      if (data) setProdutos(data);
-    } catch (err: any) {
-      setErro('Erro ao carregar lista de produtos.');
-    }
-  }
+    
+    return () => {
+      isMounted = false;
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [carregarProdutos]);
 
   const produtosFiltrados = produtos.filter(p => 
     p.nome.toLowerCase().includes(termoBusca.toLowerCase()) || 
@@ -111,12 +123,12 @@ export default function MovimentarEstoquePage() {
 
       if (errMov) throw errMov;
 
-      // Redireciona corretamente para a rota raiz de movimentações
       router.push('/movimentacoes');
       router.refresh();
-    } catch (err: any) {
-      console.error('Erro ao registar movimentação:', err);
-      setErro(err?.message || 'Erro ao processar movimentação.');
+    } catch (err: unknown) {
+      const errorObj = err as { message?: string };
+      console.error('Erro ao registar movimentação:', errorObj);
+      setErro(errorObj?.message || 'Erro ao processar movimentação.');
       setCarregando(false);
     }
   }
