@@ -20,12 +20,10 @@ interface Produto {
 
 // Função para formatar o rótulo dando prioridade absoluta à nova coluna 'classificacao'
 function formatarRotulo(classificacao: string | null | undefined, cat: string | null | undefined, tipo: string | null | undefined, nomeProduto: string = '') {
-  // 1. Se já tiver preenchido na nova coluna do Supabase, usa diretamente
   if (classificacao && classificacao.trim() !== '') {
     return classificacao.toUpperCase().trim();
   }
 
-  // 2. Fallback de segurança para itens antigos
   const valor = (tipo || cat || '').toUpperCase().trim();
   const nome = nomeProduto.toUpperCase().trim();
 
@@ -127,12 +125,6 @@ export default function EstoquePage() {
 
           <div className="flex flex-wrap gap-2">
             <button
-              onClick={() => router.push('/produtos')}
-              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold rounded-xl border border-slate-700 transition-colors cursor-pointer flex items-center gap-2"
-            >
-              <span>⚙️</span> Gestão de Produtos
-            </button>
-            <button
               onClick={() => router.push('/vendas')}
               className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold rounded-xl border border-slate-700 transition-colors cursor-pointer flex items-center gap-2"
             >
@@ -149,6 +141,12 @@ export default function EstoquePage() {
               className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold rounded-xl border border-slate-700 transition-colors cursor-pointer flex items-center gap-2"
             >
               <span>📦</span> Lançar Entrada
+            </button>
+            <button
+              onClick={() => router.push('/vendas/lancar')}
+              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-xl shadow-lg transition-colors cursor-pointer flex items-center gap-2"
+            >
+              <span>➕</span> Nova Venda
             </button>
           </div>
         </div>
