@@ -17,8 +17,19 @@ interface Produto {
   preco_venda: number;
   estoque_atual: number;
   estoque_minimo: number;
-  categoria: string;
+  classificacao?: string;
+  Classificacao?: string;
+  classificação?: string;
+  categoria?: string;
 }
+
+const OPCOES_CLASSIFICACAO = [
+  'Produto Finalizado',
+  'Insumo (Matéria-Prima)',
+  'Almoxarifado (Consumo Interno)',
+  'Embalagem',
+  'EPI'
+];
 
 export default function EstoquePage() {
   const router = useRouter();
@@ -28,19 +39,8 @@ export default function EstoquePage() {
   const [erro, setErro] = useState<string | null>(null);
 
   const [buscaNome, setBuscaNome] = useState<string>('');
-  const [filtroCategoria, setFiltroCategoria] = useState<string>('TODAS');
+  const [filtroClassificacao, setFiltroClassificacao] = useState<string>('TODAS');
   const [filtroEstoque, setFiltroEstoque] = useState<string>('TODOS');
-
-  const formatarCategoria = (cat: string) => {
-    if (!cat) return 'Produto Final';
-    switch (cat) {
-      case 'MATERIA_PRIMA': return 'Matéria-Prima';
-      case 'EMBALAGEM': return 'Embalagem';
-      case 'EPI': return 'EPI';
-      case 'CONSUMO_INTERNO': return 'Limpeza/Consumo';
-      default: return cat.replace(/_/g, ' ');
-    }
-  };
 
   useEffect(() => {
     let montado = true;
@@ -58,6 +58,7 @@ export default function EstoquePage() {
         if (error) throw error;
 
         if (montado && data) {
+          console.log("Dados vindos do Supabase (Estoque):", data); // <--- Veja isto no F12 > Console
           setProdutos(data);
         }
       } catch (err: any) {
@@ -79,15 +80,14 @@ export default function EstoquePage() {
     };
   }, []);
 
-  const categoriasUnicas = useMemo(() => {
-    const cats = produtos.map((p) => p.categoria).filter(Boolean);
-    return Array.from(new Set(cats));
-  }, [produtos]);
-
   const produtosFiltrados = useMemo(() => {
     return produtos.filter((produto) => {
       const bateuNome = produto.nome.toLowerCase().includes(buscaNome.toLowerCase());
-      const bateuCategoria = filtroCategoria === 'TODAS' || produto.categoria === filtroCategoria;
+      
+      // Tenta apanhar qualquer variação de nome de coluna que possa vir do Supabase
+      const valorClassificacao = produto.classificacao || produto.Classificacao || produto.classificação || produto.categoria || 'Produto Finalizado';
+      
+      const bateuClassificacao = filtroClassificacao === 'TODAS' || valorClassificacao === filtroClassificacao;
 
       let bateuEstoque = true;
       if (filtroEstoque === 'DISPONIVEL') {
@@ -96,9 +96,9 @@ export default function EstoquePage() {
         bateuEstoque = produto.estoque_atual <= 0;
       }
 
-      return bateuNome && bateuCategoria && bateuEstoque;
+      return bateuNome && bateuClassificacao && bateuEstoque;
     });
-  }, [produtos, buscaNome, filtroCategoria, filtroEstoque]);
+  }, [produtos, buscaNome, filtroClassificacao, filtroEstoque]);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-6">
@@ -114,7 +114,7 @@ export default function EstoquePage() {
           <div className="flex flex-wrap items-center gap-3">
             <button
               onClick={() => router.push('/')}
-              className="bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold px-4 py-2.5 rounded-lg border border-slate-700 shadow-sm transition-colors text-sm"
+              className="bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold px-4 py-2.5 rounded-lg border border-slate-700 shadow-sm transition-colors text-sm cursor-pointer"
             >
               ← Voltar ao Início
             </button>
@@ -135,15 +135,15 @@ export default function EstoquePage() {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-400 mb-1">Categoria</label>
+            <label className="block text-xs font-semibold text-slate-400 mb-1">Classificação / Tipo</label>
             <select
-              value={filtroCategoria}
-              onChange={(e) => setFiltroCategoria(e.target.value)}
+              value={filtroClassificacao}
+              onChange={(e) => setFiltroClassificacao(e.target.value)}
               className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
             >
-              <option value="TODAS" className="bg-slate-900">Todas as Categorias</option>
-              {categoriasUnicas.map((cat) => (
-                <option key={cat} value={cat} className="bg-slate-900">{formatarCategoria(cat)}</option>
+              <option value="TODAS" className="bg-slate-900">Todas as Classificações</option>
+              {OPCOES_CLASSIFICACAO.map((opt) => (
+                <option key={opt} value={opt} className="bg-slate-900">{opt}</option>
               ))}
             </select>
           </div>
@@ -162,7 +162,7 @@ export default function EstoquePage() {
           </div>
         </div>
 
-        {/* Tabela (Sem coluna SKU) */}
+        {/* Tabela */}
         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md">
           {carregando ? (
             <div className="p-8 text-center text-slate-400 animate-pulse font-medium">
@@ -178,7 +178,7 @@ export default function EstoquePage() {
                 <thead>
                   <tr className="border-b border-slate-800 bg-slate-950/50 text-xs font-bold text-slate-400 uppercase tracking-wider">
                     <th className="p-3.5">Nome do Item</th>
-                    <th className="p-3.5">Categoria</th>
+                    <th className="p-3.5">Classificação</th>
                     <th className="p-3.5 text-right">Preço Venda</th>
                     <th className="p-3.5 text-right">Estoque Atual</th>
                   </tr>
@@ -191,24 +191,28 @@ export default function EstoquePage() {
                       </td>
                     </tr>
                   ) : (
-                    produtosFiltrados.map((produto) => (
-                      <tr key={produto.id} className="hover:bg-slate-800/40 transition-colors">
-                        <td className="p-3.5 font-semibold text-slate-100">{produto.nome}</td>
-                        <td className="p-3.5 text-xs font-bold">
-                          <span className="px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700 inline-block">
-                            {formatarCategoria(produto.categoria)}
-                          </span>
-                        </td>
-                        <td className="p-3.5 text-right font-mono text-emerald-400">
-                          {produto.preco_venda > 0 ? `R$ ${Number(produto.preco_venda).toFixed(2)}` : '—'}
-                        </td>
-                        <td className="p-3.5 text-right font-bold text-slate-100">
-                          <span className={produto.estoque_atual <= (produto.estoque_minimo || 0) ? 'text-amber-400' : 'text-slate-100'}>
-                            {produto.estoque_atual} un
-                          </span>
-                        </td>
-                      </tr>
-                    ))
+                    produtosFiltrados.map((produto) => {
+                      const tipoExibicao = produto.classificacao || produto.Classificacao || produto.classificação || produto.categoria || 'Produto Finalizado';
+
+                      return (
+                        <tr key={produto.id} className="hover:bg-slate-800/40 transition-colors">
+                          <td className="p-3.5 font-semibold text-slate-100">{produto.nome}</td>
+                          <td className="p-3.5 text-xs font-bold">
+                            <span className="px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700 inline-block">
+                              {tipoExibicao}
+                            </span>
+                          </td>
+                          <td className="p-3.5 text-right font-mono text-emerald-400">
+                            {produto.preco_venda > 0 ? `R$ ${Number(produto.preco_venda).toFixed(2)}` : '—'}
+                          </td>
+                          <td className="p-3.5 text-right font-bold text-slate-100">
+                            <span className={produto.estoque_atual <= (produto.estoque_minimo || 0) ? 'text-amber-400' : 'text-slate-100'}>
+                              {produto.estoque_atual} un
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>

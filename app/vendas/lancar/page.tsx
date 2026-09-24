@@ -159,7 +159,6 @@ export default function NovaVendaPage() {
 
         if (error) throw error;
         if (data) {
-          // Filtrar apenas produtos finalizados para a venda
           const apenasFinalizados = data.filter(
             (p) => formatarRotulo(p.categoria, p.tipo, p.nome) === 'PRODUTO FINALIZADO'
           );
@@ -291,6 +290,7 @@ export default function NovaVendaPage() {
       setSalvando(true);
       setErro(null);
 
+      // 1. Registar a venda principal
       const { data: vendaData, error: vendaError } = await supabase
         .from('vendas')
         .insert([
@@ -308,7 +308,9 @@ export default function NovaVendaPage() {
       if (vendaError) throw vendaError;
       const vendaId = vendaData.id;
 
+      // 2. Processar cada item da venda
       for (const item of itens) {
+        // Guardar item da venda
         const { error: itemError } = await supabase.from('itens_venda').insert([
           {
             venda_id: vendaId,
@@ -320,6 +322,7 @@ export default function NovaVendaPage() {
         ]);
         if (itemError) throw itemError;
 
+        // Atualizar estoque atual do produto
         const produtoOriginal = produtos.find((p) => p.id === item.produto_id);
         const estoqueAtual = produtoOriginal ? produtoOriginal.estoque_atual : 0;
         const novoEstoque = Math.max(0, estoqueAtual - item.quantidade);
@@ -330,21 +333,38 @@ export default function NovaVendaPage() {
           .eq('id', item.produto_id);
 
         if (prodError) throw prodError;
+
+        // Registar explicitamente na tabela de movimentações com tipo VENDA
+        const { error: movError } = await supabase.from('movimentacoes').insert([
+          {
+            produto_id: item.produto_id,
+            tipo: 'VENDA',
+            quantidade: item.quantidade,
+            observacao: cliente,
+            created_at: `${dataVenda}T12:00:00.000Z`,
+          },
+        ]);
+        
+        if (movError) {
+          throw new Error(`Erro ao registar movimentação de venda para o produto ${item.nome}: ${movError.message}`);
+        }
       }
 
-      alert('Venda registada com sucesso!');
+      alert('Venda registada e lançada nas movimentações de estoque com sucesso!');
       router.push('/vendas');
       router.refresh();
     } catch (err: unknown) {
+      console.error("Erro completo:", err);
       const errObj = err as Record<string, any>;
       
-      const mensagem = 
+      const mensagemDetalhada = 
         errObj?.message || 
         errObj?.error_description || 
         errObj?.details || 
-        (errObj ? JSON.stringify(errObj, Object.getOwnPropertyNames(errObj), 2) : 'Erro desconhecido ao finalizar venda.');
+        JSON.stringify(errObj, null, 2);
         
-      setErro(mensagem);
+      setErro(mensagemDetalhada);
+      alert("Erro do Supabase: " + mensagemDetalhada);
     } finally {
       setSalvando(false);
     }

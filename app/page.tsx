@@ -12,17 +12,23 @@ const supabase = createClient(
 interface Produto {
   id: string;
   nome: string;
+  classificacao?: string | null;
   categoria?: string | null;
   tipo?: string | null;
   estoque_atual: number;
 }
 
-// Função para traduzir, formalizar e forçar EPI para itens de proteção pelo nome
-function formatarRotulo(cat: string | null | undefined, tipo: string | null | undefined, nomeProduto: string = '') {
+// Função para formatar o rótulo dando prioridade absoluta à nova coluna 'classificacao'
+function formatarRotulo(classificacao: string | null | undefined, cat: string | null | undefined, tipo: string | null | undefined, nomeProduto: string = '') {
+  // 1. Se já tiver preenchido na nova coluna do Supabase, usa diretamente
+  if (classificacao && classificacao.trim() !== '') {
+    return classificacao.toUpperCase().trim();
+  }
+
+  // 2. Fallback de segurança para itens antigos
   const valor = (tipo || cat || '').toUpperCase().trim();
   const nome = nomeProduto.toUpperCase().trim();
 
-  // Forçar identificação como EPI para itens de proteção específicos
   if (
     nome.includes('LUVA') || 
     nome.includes('MÁSCARA') || 
@@ -33,34 +39,35 @@ function formatarRotulo(cat: string | null | undefined, tipo: string | null | un
     return 'EPI';
   }
 
-  if (valor.includes('MATERIA') || valor.includes('INSUMO')) return 'INSUMO';
-  if (valor.includes('CONSUMO') || valor.includes('ALMOXARIFADO')) return 'ALMOXARIFADO';
+  if (valor.includes('MATERIA') || valor.includes('INSUMO')) return 'INSUMO (MATÉRIA-PRIMA)';
+  if (valor.includes('CONSUMO') || valor.includes('ALMOXARIFADO')) return 'ALMOXARIFADO (CONSUMO INTERNO)';
   if (valor.includes('EMBALAGEM')) return 'EMBALAGEM';
   if (valor.includes('ACABADO') || valor.includes('PRODUTO')) return 'PRODUTO FINALIZADO';
   
-  if (!valor) return 'SEM CATEGORIA';
-  return valor.replace(/_/g, ' ');
+  return 'PRODUTO FINALIZADO';
 }
 
-// Cores personalizadas e distintas para cada classificação (com Produto Finalizado em Dourado #D4AF37)
-function obterEstiloRotulo(cat: string | null | undefined, tipo: string | null | undefined, nomeProduto: string = '') {
-  const rotulo = formatarRotulo(cat, tipo, nomeProduto);
-  
-  switch (rotulo) {
-    case 'EPI':
-      return 'bg-emerald-950/65 text-emerald-400 border-emerald-800/40';
-    case 'INSUMO':
-      return 'bg-blue-950/65 text-blue-400 border-blue-800/40';
-    case 'ALMOXARIFADO':
-      return 'bg-purple-950/65 text-purple-400 border-purple-800/40';
-    case 'EMBALAGEM':
-      return 'bg-amber-950/65 text-amber-400 border-amber-800/40';
-    case 'PRODUTO FINALIZADO':
-      return 'bg-[#D4AF37]/15 text-[#D4AF37] border-[#D4AF37]/40';
-    default:
-      return 'bg-slate-800 text-slate-400 border-slate-700';
+// Cores personalizadas para cada classificação
+function obterEstiloRotulo(rotulo: string) {
+  const r = rotulo.toUpperCase();
+  if (r.includes('EPI')) {
+    return 'bg-emerald-950/65 text-emerald-400 border-emerald-800/40';
   }
+  if (r.includes('INSUMO') || r.includes('MATÉRIA')) {
+    return 'bg-blue-950/65 text-blue-400 border-blue-800/40';
+  }
+  if (r.includes('ALMOXARIFADO') || r.includes('CONSUMO')) {
+    return 'bg-purple-950/65 text-purple-400 border-purple-800/40';
+  }
+  if (r.includes('EMBALAGEM')) {
+    return 'bg-amber-950/65 text-amber-400 border-amber-800/40';
+  }
+  if (r.includes('FINALIZADO')) {
+    return 'bg-[#D4AF37]/15 text-[#D4AF37] border-[#D4AF37]/40';
+  }
+  return 'bg-slate-800 text-slate-400 border-slate-700';
 }
+
 export default function EstoquePage() {
   const router = useRouter();
   const [produtos, setProdutos] = useState<Produto[]>([]);
@@ -88,15 +95,13 @@ export default function EstoquePage() {
   }, []);
 
   const produtosFiltrados = produtos.filter((p) => {
-    const rotuloAtual = formatarRotulo(p.categoria, p.tipo, p.nome);
+    const rotuloAtual = formatarRotulo(p.classificacao, p.categoria, p.tipo, p.nome);
 
     const matchNome = p.nome.toLowerCase().includes(busca.toLowerCase());
     
     let matchCat = true;
-    if (categoriaFiltro === 'SEM_CATEGORIA') {
-      matchCat = !p.categoria && !p.tipo;
-    } else if (categoriaFiltro !== 'TODAS') {
-      matchCat = rotuloAtual === categoriaFiltro;
+    if (categoriaFiltro !== 'TODAS') {
+      matchCat = rotuloAtual.includes(categoriaFiltro.toUpperCase());
     }
     
     let matchStatus = true;
@@ -122,6 +127,12 @@ export default function EstoquePage() {
 
           <div className="flex flex-wrap gap-2">
             <button
+              onClick={() => router.push('/produtos')}
+              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold rounded-xl border border-slate-700 transition-colors cursor-pointer flex items-center gap-2"
+            >
+              <span>⚙️</span> Gestão de Produtos
+            </button>
+            <button
               onClick={() => router.push('/vendas')}
               className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold rounded-xl border border-slate-700 transition-colors cursor-pointer flex items-center gap-2"
             >
@@ -138,12 +149,6 @@ export default function EstoquePage() {
               className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold rounded-xl border border-slate-700 transition-colors cursor-pointer flex items-center gap-2"
             >
               <span>📦</span> Lançar Entrada
-            </button>
-            <button
-              onClick={() => router.push('/vendas/lancar')}
-              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-xl shadow-lg transition-colors cursor-pointer flex items-center gap-2"
-            >
-              <span>➕</span> Nova Venda
             </button>
           </div>
         </div>
@@ -169,12 +174,11 @@ export default function EstoquePage() {
               className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
             >
               <option value="TODAS">Todas as Classificações</option>
-              <option value="PRODUTO FINALIZADO">Produto Finalizado</option>
-              <option value="INSUMO">Insumo (Matéria-Prima)</option>
-              <option value="ALMOXARIFADO">Almoxarifado (Consumo Interno)</option>
-              <option value="EMBALAGEM">Embalagem</option>
+              <option value="Produto Finalizado">Produto Finalizado</option>
+              <option value="Insumo">Insumo (Matéria-Prima)</option>
+              <option value="Almoxarifado">Almoxarifado (Consumo Interno)</option>
+              <option value="Embalagem">Embalagem</option>
               <option value="EPI">EPI</option>
-              <option value="SEM_CATEGORIA">⚠️ Sem Classificação</option>
             </select>
           </div>
 
@@ -218,8 +222,8 @@ export default function EstoquePage() {
                   </tr>
                 ) : (
                   produtosFiltrados.map((p) => {
-                    const rotuloExibicao = formatarRotulo(p.categoria, p.tipo, p.nome);
-                    const estiloCor = obterEstiloRotulo(p.categoria, p.tipo, p.nome);
+                    const rotuloExibicao = formatarRotulo(p.classificacao, p.categoria, p.tipo, p.nome);
+                    const estiloCor = obterEstiloRotulo(rotuloExibicao);
                     return (
                       <tr key={p.id} className="hover:bg-slate-800/40 transition-colors">
                         <td className="p-4 sm:p-5 font-semibold text-slate-100">{p.nome}</td>
