@@ -133,7 +133,7 @@ const LISTA_CLIENTES = [
 export default function NovaVendaPage() {
   const router = useRouter();
   const [produtos, setProdutos] = useState<Produto[]>([]);
-  const [carregando, setCarregando] = useState<boolean>(true);
+  const [, setCarregando] = useState<boolean>(true);
   const [salvando, setSalvando] = useState<boolean>(false);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -165,6 +165,7 @@ export default function NovaVendaPage() {
           setProdutos(apenasFinalizados);
         }
       } catch (err: unknown) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const errObj = err as Record<string, any>;
         const mensagem = errObj?.message || errObj?.details || 'Erro ao carregar produtos.';
         setErro(mensagem);
@@ -355,6 +356,7 @@ export default function NovaVendaPage() {
       router.refresh();
     } catch (err: unknown) {
       console.error("Erro completo:", err);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const errObj = err as Record<string, any>;
       
       const mensagemDetalhada = 
@@ -390,7 +392,7 @@ export default function NovaVendaPage() {
 
         <form onSubmit={handleSubmit} className="space-y-6">
           {erro && (
-            <div className="p-4 border border-red-500/30 bg-red-950/50 text-red-400 rounded-lg text-sm break-words whitespace-pre-wrap">
+            <div className="p-4 border border-red-500/30 bg-red-950/50 text-red-400 rounded-lg text-sm wrap-break-word whitespace-pre-wrap">
               <strong>Erro ao registar a venda:</strong>
               <br />
               {erro}
