@@ -15,6 +15,7 @@ interface Produto {
   categoria?: string | null;
   tipo?: string | null;
   classificacao?: string | null;
+  ativo?: boolean | null;
   preco_venda: number;
   estoque_atual: number;
 }
@@ -123,7 +124,6 @@ export default function NovaVendaPage() {
   
   const [itens, setItens] = useState<ItemVenda[]>([]);
   
-  // Estados para digitação e seleção livre do produto
   const [termoBuscaProduto, setTermoBuscaProduto] = useState<string>('');
   const [produtoSelecionadoId, setProdutoSelecionadoId] = useState<string>('');
   const [quantidadeItem, setQuantidadeItem] = useState<string>('1');
@@ -133,21 +133,30 @@ export default function NovaVendaPage() {
     async function carregarProdutos() {
       try {
         setCarregando(true);
-        // Filtra diretamente os produtos que possuem a classificação de Produto Finalizado no Supabase
+        // Consulta apenas colunas existentes no banco de dados
         const { data, error } = await supabase
           .from('produtos')
-          .select('id, nome, categoria, tipo, classificacao, preco_venda, estoque_atual')
+          .select('id, nome, categoria, tipo, classificacao, ativo, preco_venda, estoque_atual')
           .eq('classificacao', 'Produto Finalizado')
           .order('nome', { ascending: true });
 
         if (error) throw error;
         if (data) {
           const produtosValidos = data.filter((p) => {
+            // Se o campo ativo for explicitamente falso
+            if (p.ativo === false) return false;
+
             const catTipo = (p.categoria || p.tipo || '').toUpperCase();
             const nomeProd = (p.nome || '').toUpperCase();
             
-            // Exclui apenas se tiver explicitamente oculto ou inativo
-            if (catTipo.includes('OCULTO') || catTipo.includes('INATIVO') || nomeProd.includes('OCULTO')) {
+            // Exclui se contiver termos de ocultação ou inatividade em qualquer campo textual
+            if (
+              catTipo.includes('OCULTO') || 
+              catTipo.includes('INATIVO') || 
+              catTipo.includes('FALSE') ||
+              nomeProd.includes('OCULTO') ||
+              nomeProd.includes('INATIVO')
+            ) {
               return false;
             }
             return true;
