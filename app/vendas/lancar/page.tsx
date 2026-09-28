@@ -14,6 +14,7 @@ interface Produto {
   nome: string;
   categoria?: string | null;
   tipo?: string | null;
+  classificacao?: string | null;
   preco_venda: number;
   estoque_atual: number;
 }
@@ -24,28 +25,6 @@ interface ItemVenda {
   quantidade: number;
   preco_unitario: number;
   subtotal: number;
-}
-
-function formatarRotulo(cat: string | null | undefined, tipo: string | null | undefined, nomeProduto: string = '') {
-  const valor = (tipo || cat || '').toUpperCase().trim();
-  const nome = nomeProduto.toUpperCase().trim();
-
-  if (
-    nome.includes('LUVA') || 
-    nome.includes('MÁSCARA') || 
-    nome.includes('PROPÉ') || 
-    nome.includes('TOUCA') ||
-    valor.includes('EPI')
-  ) {
-    return 'EPI';
-  }
-
-  if (valor.includes('MATERIA') || valor.includes('INSUMO')) return 'INSUMO';
-  if (valor.includes('CONSUMO') || valor.includes('ALMOXARIFADO')) return 'ALMOXARIFADO';
-  if (valor.includes('EMBALAGEM')) return 'EMBALAGEM';
-  if (valor.includes('ACABADO') || valor.includes('PRODUTO')) return 'PRODUTO FINALIZADO';
-  
-  return valor.replace(/_/g, ' ');
 }
 
 const LISTA_CLIENTES = [
@@ -143,6 +122,9 @@ export default function NovaVendaPage() {
   const [observacoes, setObservacoes] = useState<string>('');
   
   const [itens, setItens] = useState<ItemVenda[]>([]);
+  
+  // Estados para digitação e seleção livre do produto
+  const [termoBuscaProduto, setTermoBuscaProduto] = useState<string>('');
   const [produtoSelecionadoId, setProdutoSelecionadoId] = useState<string>('');
   const [quantidadeItem, setQuantidadeItem] = useState<string>('1');
   const [precoUnitarioItem, setPrecoUnitarioItem] = useState<string>('0');
@@ -151,17 +133,26 @@ export default function NovaVendaPage() {
     async function carregarProdutos() {
       try {
         setCarregando(true);
+        // Filtra diretamente os produtos que possuem a classificação de Produto Finalizado no Supabase
         const { data, error } = await supabase
           .from('produtos')
-          .select('id, nome, categoria, tipo, preco_venda, estoque_atual')
+          .select('id, nome, categoria, tipo, classificacao, preco_venda, estoque_atual')
+          .eq('classificacao', 'Produto Finalizado')
           .order('nome', { ascending: true });
 
         if (error) throw error;
         if (data) {
-          const apenasFinalizados = data.filter(
-            (p) => formatarRotulo(p.categoria, p.tipo, p.nome) === 'PRODUTO FINALIZADO'
-          );
-          setProdutos(apenasFinalizados);
+          const produtosValidos = data.filter((p) => {
+            const catTipo = (p.categoria || p.tipo || '').toUpperCase();
+            const nomeProd = (p.nome || '').toUpperCase();
+            
+            // Exclui apenas se tiver explicitamente oculto ou inativo
+            if (catTipo.includes('OCULTO') || catTipo.includes('INATIVO') || nomeProd.includes('OCULTO')) {
+              return false;
+            }
+            return true;
+          });
+          setProdutos(produtosValidos);
         }
       } catch (err: unknown) {
         const errObj = err as Record<string, unknown>;
@@ -174,17 +165,42 @@ export default function NovaVendaPage() {
     carregarProdutos();
   }, []);
 
-  const handleSelecionarProduto = (id: string) => {
-    setProdutoSelecionadoId(id);
-    const prod = produtos.find((p) => p.id === id);
+  const handleInputChangeProduto = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const valorDigitado = e.target.value;
+    setTermoBuscaProduto(valorDigitado);
+
+    const prodEncontrado = produtos.find(
+      (p) => p.nome.toLowerCase() === valorDigitado.toLowerCase()
+    );
+
+    if (prodEncontrado) {
+      setProdutoSelecionadoId(prodEncontrado.id);
+      setPrecoUnitarioItem(String(prodEncontrado.preco_venda || 0));
+    } else {
+      setProdutoSelecionadoId('');
+    }
+  };
+
+  const handleSelecionarPorDatalist = (valorDigitado: string) => {
+    setTermoBuscaProduto(valorDigitado);
+    const prod = produtos.find((p) => p.nome.toLowerCase() === valorDigitado.toLowerCase());
     if (prod) {
+      setProdutoSelecionadoId(prod.id);
       setPrecoUnitarioItem(String(prod.preco_venda || 0));
+    } else {
+      setProdutoSelecionadoId('');
     }
   };
 
   const adicionarItem = () => {
-    if (!produtoSelecionadoId) {
-      alert('Selecione um produto.');
+    let produto = produtos.find((p) => p.id === produtoSelecionadoId);
+
+    if (!produto && termoBuscaProduto.trim() !== '') {
+      produto = produtos.find((p) => p.nome.toLowerCase() === termoBuscaProduto.trim().toLowerCase());
+    }
+
+    if (!produto) {
+      alert('Selecione um produto válido da lista.');
       return;
     }
 
@@ -200,15 +216,12 @@ export default function NovaVendaPage() {
       return;
     }
 
-    const produto = produtos.find((p) => p.id === produtoSelecionadoId);
-    if (!produto) return;
-
     if (qtd > produto.estoque_atual) {
       alert(`Estoque insuficiente! Disponível: ${produto.estoque_atual}`);
       return;
     }
 
-    const indexExistente = itens.findIndex((i) => i.produto_id === produto.id);
+    const indexExistente = itens.findIndex((i) => i.produto_id === produto!.id);
     if (indexExistente >= 0) {
       const novosItens = [...itens];
       const novaQtd = novosItens[indexExistente].quantidade + qtd;
@@ -233,6 +246,7 @@ export default function NovaVendaPage() {
       ]);
     }
 
+    setTermoBuscaProduto('');
     setProdutoSelecionadoId('');
     setQuantidadeItem('1');
     setPrecoUnitarioItem('0');
@@ -422,23 +436,27 @@ export default function NovaVendaPage() {
           </div>
 
           <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-3">
-            <h2 className="text-xs font-semibold tracking-wide text-slate-400 uppercase">2. Seleção de Produtos (Apenas Finalizados)</h2>
+            <h2 className="text-xs font-semibold tracking-wide text-slate-400 uppercase">2. Pesquisa e Seleção de Produtos</h2>
             
             <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
               <div className="sm:col-span-6">
-                <label className="block text-xs font-medium text-slate-400 mb-1">Produto</label>
-                <select
-                  value={produtoSelecionadoId}
-                  onChange={(e) => handleSelecionarProduto(e.target.value)}
+                <label className="block text-xs font-medium text-slate-400 mb-1">Digite ou Selecione o Produto</label>
+                <input
+                  type="text"
+                  list="lista-produtos"
+                  value={termoBuscaProduto}
+                  onChange={handleInputChangeProduto}
+                  onBlur={(e) => handleSelecionarPorDatalist(e.target.value)}
+                  placeholder="Ex: Yerba Display..."
                   className="w-full p-3 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">Selecione um produto...</option>
+                />
+                <datalist id="lista-produtos">
                   {produtos.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.nome} (Estoque: {p.estoque_atual})
+                    <option key={p.id} value={p.nome}>
+                      Estoque: {p.estoque_atual} | R$ {p.preco_venda.toFixed(2)}
                     </option>
                   ))}
-                </select>
+                </datalist>
               </div>
 
               <div className="sm:col-span-2">
