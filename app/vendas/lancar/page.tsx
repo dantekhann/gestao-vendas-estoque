@@ -133,7 +133,6 @@ export default function NovaVendaPage() {
     async function carregarProdutos() {
       try {
         setCarregando(true);
-        // Consulta apenas colunas existentes no banco de dados
         const { data, error } = await supabase
           .from('produtos')
           .select('id, nome, categoria, tipo, classificacao, ativo, preco_venda, estoque_atual')
@@ -143,13 +142,9 @@ export default function NovaVendaPage() {
         if (error) throw error;
         if (data) {
           const produtosValidos = data.filter((p) => {
-            // Se o campo ativo for explicitamente falso
             if (p.ativo === false) return false;
-
             const catTipo = (p.categoria || p.tipo || '').toUpperCase();
             const nomeProd = (p.nome || '').toUpperCase();
-            
-            // Exclui se contiver termos de ocultação ou inatividade em qualquer campo textual
             if (
               catTipo.includes('OCULTO') || 
               catTipo.includes('INATIVO') || 
@@ -173,6 +168,150 @@ export default function NovaVendaPage() {
     }
     carregarProdutos();
   }, []);
+
+  const handleImportarPdfWhatsApp = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const fileName = file.name;
+
+    const matchData = fileName.match(/(\d{2})-(\d{2})-(\d{4})/);
+    if (matchData) {
+      const [, dia, mes, ano] = matchData;
+      setDataVenda(`${ano}-${mes}-${dia}`);
+    }
+
+    const nomeLimpo = fileName
+      .replace(/\.pdf$/i, '')
+      .replace(/_Orcamento_.*$/i, '')
+      .replace(/_/g, ' ')
+      .trim();
+
+    const clienteEncontrado = LISTA_CLIENTES.find((cli) => {
+      const cliNorm = cli.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      const nomeNorm = nomeLimpo.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      const primeiraPalavra = nomeNorm.split(' ')[0];
+      return cliNorm.includes(nomeNorm) || (primeiraPalavra.length > 2 && cliNorm.includes(primeiraPalavra));
+    });
+
+    if (clienteEncontrado) {
+      setCliente(clienteEncontrado);
+    }
+
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+
+      // @ts-expect-error window.pdfjsLib is loaded externally
+      if (!window.pdfjsLib) {
+        await new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+          script.onload = () => {
+            // @ts-expect-error window.pdfjsLib global
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            resolve(true);
+          };
+          script.onerror = reject;
+          document.head.appendChild(script);
+        });
+      }
+
+      // @ts-expect-error window.pdfjsLib global
+      const loadingTask = window.pdfjsLib.getDocument({ data: arrayBuffer });
+      const pdfDoc = await loadingTask.promise;
+      
+      const linhasTexto: string[] = [];
+
+      for (let i = 1; i <= pdfDoc.numPages; i++) {
+        const page = await pdfDoc.getPage(i);
+        const textContent = await page.getTextContent();
+        const items = textContent.items as Array<{ str: string; transform: number[] }>;
+
+        const linhasMap: { [y: string]: string[] } = {};
+        items.forEach((item) => {
+          if (!item.str || !item.str.trim()) return;
+          const yCoord = Math.round(item.transform[5] / 8) * 8; 
+          if (!linhasMap[yCoord]) linhasMap[yCoord] = [];
+          linhasMap[yCoord].push(item.str.trim());
+        });
+
+        const coordenadasY = Object.keys(linhasMap).map(Number).sort((a, b) => b - a);
+        coordenadasY.forEach((y) => {
+          linhasTexto.push(linhasMap[y].join(' '));
+        });
+      }
+
+      const itensMapeados: ItemVenda[] = [];
+
+      linhasTexto.forEach((linha) => {
+        const linhaNorm = linha.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        if (linhaNorm.includes('total') || linhaNorm.includes('desconto')) return;
+
+        produtos.forEach((prod) => {
+          if (itensMapeados.some(i => i.produto_id === prod.id)) return;
+
+          const nomeP = prod.nome.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          const palavrasChave = nomeP.split(' ').filter(p => p.length > 2);
+          if (palavrasChave.length === 0) return;
+
+          const matchCompleto = palavrasChave.every(palavra => linhaNorm.includes(palavra));
+
+          if (matchCompleto) {
+            const numerosEncontrados = linha.match(/(\d{1,3}(?:\.\d{3})*,\d{2})|(\d+)/g);
+
+            let quantidade = 1;
+
+            if (numerosEncontrados && numerosEncontrados.length > 0) {
+              const nums = numerosEncontrados.map(n => parseFloat(n.replace(/\./g, '').replace(',', '.')));
+              
+              const qtdCandidata = nums.find(n => n > 0 && n < 1000);
+              if (qtdCandidata !== undefined) {
+                quantidade = qtdCandidata;
+              }
+            }
+
+            const precoUnitario = prod.preco_venda;
+            const subtotal = quantidade * precoUnitario;
+
+            itensMapeados.push({
+              produto_id: prod.id,
+              nome: prod.nome,
+              quantidade: quantidade,
+              preco_unitario: precoUnitario,
+              subtotal: subtotal
+            });
+          }
+        });
+      });
+
+      let descontoEncontrado = '0';
+      for (const t of linhasTexto) {
+        if (t.toLowerCase().includes('desconto')) {
+          const matchVal = t.match(/([\d\.]+,\d{2})|(\d+)/g);
+          if (matchVal) {
+            const ultimoNum = matchVal[matchVal.length - 1].replace(/\./g, '').replace(',', '.');
+            const numVal = parseFloat(ultimoNum);
+            if (!isNaN(numVal) && numVal > 0 && numVal < 10000) {
+              descontoEncontrado = String(numVal);
+              break;
+            }
+          }
+        }
+      }
+      setDesconto(descontoEncontrado);
+
+      if (itensMapeados.length > 0) {
+        setItens(itensMapeados);
+        alert(`PDF importado com sucesso!\nCliente: ${clienteEncontrado || 'Detectado'}\nDesconto: R$ ${descontoEncontrado}\n${itensMapeados.length} item(ns) importados.`);
+      } else {
+        alert("Não foi possível extrair os itens com exatidão. Adicione-os manualmente abaixo.");
+      }
+
+    } catch (err) {
+      console.error("Erro ao ler PDF:", err);
+      alert("Erro ao processar o conteúdo interno do PDF.");
+    }
+  };
 
   const handleInputChangeProduto = (e: React.ChangeEvent<HTMLInputElement>) => {
     const valorDigitado = e.target.value;
@@ -411,6 +550,26 @@ export default function NovaVendaPage() {
           >
             ← Voltar
           </button>
+        </div>
+
+        <div className="bg-gradient-to-r from-emerald-950/40 to-blue-950/40 p-5 rounded-xl border border-emerald-500/30 shadow-md flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div>
+            <h2 className="text-sm font-semibold text-emerald-400 uppercase tracking-wider">
+              Importar Pedido do WhatsApp (PDF)
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Selecione o PDF baixado para carregar cliente, data, desconto e produtos exatos na ordem correta.
+            </p>
+          </div>
+          <label className="w-full sm:w-auto px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg text-sm text-center cursor-pointer transition-colors shadow-sm whitespace-nowrap">
+            📂 Selecionar PDF
+            <input
+              type="file"
+              accept=".pdf"
+              onChange={handleImportarPdfWhatsApp}
+              className="hidden"
+            />
+          </label>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
