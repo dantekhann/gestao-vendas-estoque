@@ -53,6 +53,7 @@ export default function ProdutosAdminPage() {
       const { data, error } = await supabase
         .from('produtos')
         .select('*')
+        .eq('classificacao', 'Produto Finalizado') // Filtra apenas os produtos finalizados direto na query[cite: 8]
         .order('nome', { ascending: true });
 
       if (error) throw error;
@@ -181,13 +182,34 @@ export default function ProdutosAdminPage() {
     }
   };
 
+  const excluirProduto = async (id: string, nome: string) => {
+    if (!window.confirm(`Tem certeza absoluta que deseja EXCLUIR PERMANENTEMENTE o produto "${nome}"? Esta ação não pode ser desfeita.`)) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('produtos')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+
+      setProdutos((prev) => prev.filter((p) => p.id !== id));
+      alert('Produto excluído com sucesso!');
+    } catch (err: unknown) {
+      const errorObj = err as { message?: string };
+      alert(`Erro ao excluir produto: ${errorObj.message || 'Erro desconhecido'}`);
+    }
+  };
+
   const produtosFiltrados = produtos.filter((p) => {
     const bateBusca = p.nome.toLowerCase().includes(filtroBusca.toLowerCase().trim());
-    const isAtivo = p.ativo !== false; // Considera true se undefined
+    const isAtivo = p.ativo !== false;
 
     if (filtroStatus === 'ativos') return bateBusca && isAtivo;
     if (filtroStatus === 'inativos') return bateBusca && !isAtivo;
-    return bateBusca; // 'todos'
+    return bateBusca;
   });
 
   return (
@@ -449,6 +471,12 @@ export default function ProdutosAdminPage() {
                                   className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer border ${ativo ? 'bg-amber-950/40 hover:bg-amber-900/60 text-amber-400 border-amber-800/50' : 'bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-400 border-emerald-800/50'}`}
                                 >
                                   {ativo ? 'Ocultar' : 'Reativar'}
+                                </button>
+                                <button
+                                  onClick={() => excluirProduto(prod.id, prod.nome)}
+                                  className="px-2.5 py-1.5 bg-rose-950/60 hover:bg-rose-900/80 text-rose-400 hover:text-rose-300 border border-rose-800/50 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                                >
+                                  Excluir
                                 </button>
                               </>
                             )}

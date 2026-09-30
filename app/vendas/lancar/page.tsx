@@ -28,99 +28,10 @@ interface ItemVenda {
   subtotal: number;
 }
 
-const LISTA_CLIENTES = [
-  "Cliente Avulso",
-  "4eVINTE Head Shop (DF)",
-  "Abreu Distribuidora (RJ)",
-  "Adoro Mato (RJ)",
-  "Aladdin Brasília (DF)",
-  "Aladdin Goias (GYN)",
-  "Atacadao do Tabaco (DF)",
-  "B&M Distribuição (DF)",
-  "Barboza e Mazon Comercio de Tabacaria (Palmas - TO)",
-  "Best Price (DF)",
-  "Blend Distribuidora (DF)",
-  "Cajuru Tabacaria (SP)",
-  "Conveniencia - 309 Sul (DF)",
-  "DeBoa Tabacaria (RJ)",
-  "Dirijo Tabacaria (DF)",
-  "Distribuidora Coringa (GO)",
-  "DISTRIBUIDORA E PETISCARIA 215 NORTE (DF)",
-  "Distribuidora One - RJ",
-  "Dollar Bills (Itabuna - Bahia)",
-  "Dom Bosco Pizzaria (DF)",
-  "Dos Crias Tabacaria (ES)",
-  "Emporio Iguacu (DF)",
-  "Emporio Zingaro (DF)",
-  "Empório Zingaro de Alimentos LTDA EPP",
-  "ESTACAO MEIA UM",
-  "FK TABACARIA (DF)",
-  "Fumazila (BH)",
-  "GS TABACARIA (DF)",
-  "Havana Tabacaria (DF)",
-  "Headzup Tabacaria (DF)",
-  "Hikari Distribuidora (RJ)",
-  "Hood Tabacaria (DF)",
-  "Hookah Lounge (DF)",
-  "Ice O Lattor HeadShop (GO)",
-  "Isso é um Cachimbo (BA)",
-  "JA Distribuidora",
-  "Jimmy Distribuidor (DF)",
-  "JV Alves Conveniência (DF)",
-  "L&L Distribuidora",
-  "LB Tabacaria (MA)",
-  "LR Distribuição (DF)",
-  "LUNATIC TABACARIA",
-  "Mandala Hookah (DF)",
-  "Manga Rosa (SP)",
-  "Maria Fumaca Distribuidor (DF)",
-  "Mercado Reis (DF)",
-  "MERCEARIA REI LTDA",
-  "Na Onda Tabacaria (DF)",
-  "Oasis Companhia (RS)",
-  "Original Beco Underground (RJ)",
-  "Pamonha Doce (GO)",
-  "Perseu Gomes (DF)",
-  "Posto 303 Sul (DF)",
-  "Prime Tobacco (SP)",
-  "Red Eyes OG (MS)",
-  "Rodrigo Borges Tabacaria (DF)",
-  "RTZ TABACARIA",
-  "Sailing Pub Tabacaria",
-  "Sandoval Bebidas (DF)",
-  "Senhora Baforada (DF)",
-  "Space Box (GYN)",
-  "Tabacaria Bongada (SP)",
-  "Tabacaria Cristal (DF)",
-  "Tabacaria Cristal (RIACHO) (DF)",
-  "Tabacaria Divina Fumaça (BA)",
-  "Tabacaria do Duque (RJ)",
-  "Tabacaria Gamão (DF)",
-  "Tabacaria Palheiros (MG)",
-  "Tabacaria Rodoviaria Plano (DF)",
-  "Tabacaria RR (DF)",
-  "Tabacaria Universitária (GO)",
-  "Tacco Tabacaria (DF)",
-  "Time Bomb (DF)",
-  "Tio Chá (Nilson menegussi Junior)",
-  "TUAREG TABACARIA",
-  "Varejo",
-  "Vini (RJ)",
-  "Xolas Hookah (DF)"
-];
-
-const normalizarTexto = (str: string) =>
-  str
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
 export default function NovaVendaPage() {
   const router = useRouter();
   const [produtos, setProdutos] = useState<Produto[]>([]);
+  const [listaClientes, setListaClientes] = useState<string[]>(['Cliente Avulso']);
   const [, setCarregando] = useState<boolean>(true);
   const [salvando, setSalvando] = useState<boolean>(false);
   const [erro, setErro] = useState<string | null>(null);
@@ -138,19 +49,26 @@ export default function NovaVendaPage() {
   const [quantidadeItem, setQuantidadeItem] = useState<string>('1');
   const [precoUnitarioItem, setPrecoUnitarioItem] = useState<string>('0');
 
+  // Estados para o Modal de Novo Cliente
+  const [mostrarModalCliente, setMostrarModalCliente] = useState<boolean>(false);
+  const [novoClienteNome, setNovoClienteNome] = useState<string>('');
+  const [salvandoCliente, setSalvandoCliente] = useState<boolean>(false);
+
   useEffect(() => {
-    async function carregarProdutos() {
+    async function carregarDadosIniciais() {
       try {
         setCarregando(true);
-        const { data, error } = await supabase
+
+        // 1. Carregar Produtos
+        const { data: prodData, error: prodError } = await supabase
           .from('produtos')
           .select('id, nome, categoria, tipo, classificacao, ativo, preco_venda, estoque_atual')
           .eq('classificacao', 'Produto Finalizado')
           .order('nome', { ascending: true });
 
-        if (error) throw error;
-        if (data) {
-          const produtosValidos = data.filter((p) => {
+        if (prodError) throw prodError;
+        if (prodData) {
+          const produtosValidos = prodData.filter((p) => {
             if (p.ativo === false) return false;
             const catTipo = (p.categoria || p.tipo || '').toUpperCase();
             const nomeProd = (p.nome || '').toUpperCase();
@@ -167,16 +85,58 @@ export default function NovaVendaPage() {
           });
           setProdutos(produtosValidos);
         }
+
+        // 2. Carregar Clientes do Supabase
+        const { data: cliData, error: cliError } = await supabase
+          .from('clientes')
+          .select('nome')
+          .order('nome', { ascending: true });
+
+        if (!cliError && cliData && cliData.length > 0) {
+          const nomesSupabase = cliData.map((c: { nome: string }) => c.nome).filter(Boolean);
+          const unicos = Array.from(new Set(['Cliente Avulso', ...nomesSupabase]));
+          setListaClientes(unicos);
+        }
+
       } catch (err: unknown) {
         const errObj = err as Record<string, unknown>;
-        const mensagem = (errObj?.message as string) || (errObj?.details as string) || 'Erro ao carregar produtos.';
+        const mensagem = (errObj?.message as string) || (errObj?.details as string) || 'Erro ao carregar dados iniciais.';
         setErro(mensagem);
       } finally {
         setCarregando(false);
       }
     }
-    carregarProdutos();
+    carregarDadosIniciais();
   }, []);
+
+  const handleCadastrarNovoCliente = async () => {
+    const nomeLimpo = novoClienteNome.trim();
+    if (!nomeLimpo) {
+      alert('Digite o nome do cliente.');
+      return;
+    }
+
+    try {
+      setSalvandoCliente(true);
+      const { error } = await supabase
+        .from('clientes')
+        .insert([{ nome: nomeLimpo }]);
+
+      if (error) throw error;
+
+      const novaLista = Array.from(new Set([...listaClientes, nomeLimpo])).sort();
+      setListaClientes(novaLista);
+      setCliente(nomeLimpo);
+      setNovoClienteNome('');
+      setMostrarModalCliente(false);
+      alert('Cliente cadastrado com sucesso!');
+    } catch (err: unknown) {
+      const errObj = err as Record<string, unknown>;
+      alert('Erro ao salvar cliente no Supabase: ' + ((errObj?.message as string) || JSON.stringify(errObj)));
+    } finally {
+      setSalvandoCliente(false);
+    }
+  };
 
   const handleImportarPdfWhatsApp = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -233,14 +193,13 @@ export default function NovaVendaPage() {
         });
       }
 
-      // Procura o cliente diretamente no conteúdo do PDF (compara com a lista de clientes)
       let clienteEncontrado: string | null = null;
       for (const linha of linhasTexto) {
-        const linhaNorm = normalizarTexto(linha);
+        const linhaNorm = linha.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
         if (linhaNorm.length < 3) continue;
 
-        const matchCli = LISTA_CLIENTES.find((cli) => {
-          const cliNorm = normalizarTexto(cli);
+        const matchCli = listaClientes.find((cli) => {
+          const cliNorm = cli.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
           if (cliNorm === 'cliente avulso' || cliNorm === 'varejo') return false;
           return linhaNorm.includes(cliNorm) || cliNorm.includes(linhaNorm);
         });
@@ -251,40 +210,41 @@ export default function NovaVendaPage() {
         }
       }
 
-      // Se não achar no texto interno, tenta pelo nome do ficheiro
       if (!clienteEncontrado) {
-        const nomeLimpo = fileName
-          .replace(/\.pdf$/i, '')
-          .replace(/_Orcamento_.*$/i, '')
-          .replace(/_Proposta_.*$/i, '');
-        const nomeLimpoNorm = normalizarTexto(nomeLimpo);
-
-        clienteEncontrado = LISTA_CLIENTES.find((cli) => {
-          const cliNorm = normalizarTexto(cli);
-          if (!cliNorm || !nomeLimpoNorm) return false;
-          if (cliNorm.includes(nomeLimpoNorm) || nomeLimpoNorm.includes(cliNorm)) return true;
-          const palavrasCli = cliNorm.split(' ').filter((p) => p.length >= 2);
-          const palavrasFile = nomeLimpoNorm.split(' ').filter((p) => p.length >= 2);
-          const palavrasComuns = palavrasCli.filter((p) => palavrasFile.includes(p));
-          return palavrasComuns.length >= 2 || (palavrasComuns.length === 1 && palavrasCli.length <= 2);
-        }) || null;
+        for (const linha of linhasTexto.slice(0, 15)) {
+          if (linha.includes('Distribuidora') || linha.includes('Tabacaria') || linha.includes('Ltda') || linha.includes('(SP)') || linha.includes('(RJ)') || linha.includes('(DF)')) {
+            if (!linha.includes('ORC BRASIL')) {
+              clienteEncontrado = linha.trim();
+              break;
+            }
+          }
+        }
       }
 
       if (clienteEncontrado) {
+        if (!listaClientes.includes(clienteEncontrado)) {
+          try {
+            await supabase.from('clientes').insert([{ nome: clienteEncontrado }]);
+            const novaLista = Array.from(new Set([...listaClientes, clienteEncontrado])).sort();
+            setListaClientes(novaLista);
+          } catch (e) {
+            console.error("Erro ao auto-cadastrar cliente:", e);
+          }
+        }
         setCliente(clienteEncontrado);
       }
 
       const itensMapeados: ItemVenda[] = [];
 
       linhasTexto.forEach((linha) => {
-        const linhaNorm = normalizarTexto(linha);
+        const linhaNorm = linha.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
         if (linhaNorm.includes('total') || linhaNorm.includes('desconto')) return;
 
         produtos.forEach((prod) => {
           if (itensMapeados.some(i => i.produto_id === prod.id)) return;
 
-          const nomeP = normalizarTexto(prod.nome);
-          const palavrasChave = nomeP.split(' ').filter(p => p.length >= 2);
+          const nomeP = prod.nome.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          const palavrasChave = nomeP.split(' ').filter(p => p.length > 2);
           if (palavrasChave.length === 0) return;
 
           const matchCompleto = palavrasChave.every(palavra => linhaNorm.includes(palavra));
@@ -341,12 +301,7 @@ export default function NovaVendaPage() {
 
       if (itensMapeados.length > 0) {
         setItens(itensMapeados);
-        alert(
-          `PDF importado com sucesso!\n\n` +
-          `• Cliente: ${clienteEncontrado || 'Não identificado (mantido Avulso)'}\n` +
-          `• Desconto: R$ ${descontoEncontrado}\n` +
-          `• Itens importados: ${itensMapeados.length}`
-        );
+        alert(`PDF importado com sucesso!\nCliente: ${clienteEncontrado || 'Não detetado'}\nDesconto: R$ ${descontoEncontrado}\n${itensMapeados.length} item(ns) importados.`);
       } else {
         alert("Não foi possível extrair os itens com exatidão. Adicione-os manualmente abaixo.");
       }
@@ -625,25 +580,38 @@ export default function NovaVendaPage() {
             </div>
           )}
 
-          <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-3">
+          <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-4">
             <h2 className="text-xs font-semibold tracking-wider text-slate-400 uppercase text-center">
               1. Identificação do Cliente
             </h2>
-            <div>
-              <label className="block text-[10px] font-bold tracking-widest text-slate-400 mb-1.5 text-center uppercase">
-                SELECIONE O CLIENTE
-              </label>
-              <select
-                value={cliente}
-                onChange={(e) => setCliente(e.target.value)}
-                className="w-full p-3.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-base outline-none focus:ring-2 focus:ring-blue-500 font-semibold text-center cursor-pointer"
-              >
-                {LISTA_CLIENTES.map((cli, idx) => (
-                  <option key={idx} value={cli} className="bg-slate-950 text-slate-100 text-sm py-1">
-                    {cli}
-                  </option>
-                ))}
-              </select>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+              <div className="sm:col-span-9">
+                <label className="block text-[10px] font-bold tracking-widest text-slate-400 mb-1.5 uppercase">
+                  SELECIONE O CLIENTE
+                </label>
+                <select
+                  value={cliente}
+                  onChange={(e) => setCliente(e.target.value)}
+                  className="w-full p-3.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-base outline-none focus:ring-2 focus:ring-blue-500 font-semibold cursor-pointer"
+                >
+                  {listaClientes.map((cli, idx) => (
+                    <option key={idx} value={cli} className="bg-slate-950 text-slate-100 text-sm py-1">
+                      {cli}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="sm:col-span-3">
+                <button
+                  type="button"
+                  onClick={() => setMostrarModalCliente(true)}
+                  className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-lg text-sm transition-colors cursor-pointer shadow-sm"
+                >
+                  + Novo Cliente
+                </button>
+              </div>
             </div>
           </div>
 
@@ -843,6 +811,45 @@ export default function NovaVendaPage() {
         </form>
 
       </div>
+
+      {/* MODAL PARA ADICIONAR NOVO CLIENTE */}
+      {mostrarModalCliente && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl w-full max-w-md space-y-4 shadow-2xl">
+            <h3 className="text-lg font-bold text-white">Cadastrar Novo Cliente</h3>
+            <p className="text-xs text-slate-400">
+              O nome inserido será guardado diretamente na base de dados (tabela <code className="text-indigo-400 font-mono">clientes</code>) e ficará disponível para futuras vendas.
+            </p>
+            
+            <input
+              type="text"
+              placeholder="Nome da Loja / Distribuidora..."
+              value={novoClienteNome}
+              onChange={(e) => setNovoClienteNome(e.target.value)}
+              className="w-full p-3.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+              autoFocus
+            />
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setMostrarModalCliente(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm font-medium cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={salvandoCliente}
+                onClick={handleCadastrarNovoCliente}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-semibold cursor-pointer shadow-sm disabled:opacity-50"
+              >
+                {salvandoCliente ? 'A guardar...' : 'Guardar e Selecionar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
