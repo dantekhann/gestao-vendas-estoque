@@ -109,6 +109,15 @@ const LISTA_CLIENTES = [
   "Xolas Hookah (DF)"
 ];
 
+const normalizarTexto = (str: string) =>
+  str
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
 export default function NovaVendaPage() {
   const router = useRouter();
   const [produtos, setProdutos] = useState<Produto[]>([]);
@@ -181,23 +190,6 @@ export default function NovaVendaPage() {
       setDataVenda(`${ano}-${mes}-${dia}`);
     }
 
-    const nomeLimpo = fileName
-      .replace(/\.pdf$/i, '')
-      .replace(/_Orcamento_.*$/i, '')
-      .replace(/_/g, ' ')
-      .trim();
-
-    const clienteEncontrado = LISTA_CLIENTES.find((cli) => {
-      const cliNorm = cli.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-      const nomeNorm = nomeLimpo.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-      const primeiraPalavra = nomeNorm.split(' ')[0];
-      return cliNorm.includes(nomeNorm) || (primeiraPalavra.length > 2 && cliNorm.includes(primeiraPalavra));
-    });
-
-    if (clienteEncontrado) {
-      setCliente(clienteEncontrado);
-    }
-
     try {
       const arrayBuffer = await file.arrayBuffer();
 
@@ -241,36 +233,83 @@ export default function NovaVendaPage() {
         });
       }
 
+      // Procura o cliente diretamente no conteúdo do PDF (compara com a lista de clientes)
+      let clienteEncontrado: string | null = null;
+      for (const linha of linhasTexto) {
+        const linhaNorm = normalizarTexto(linha);
+        if (linhaNorm.length < 3) continue;
+
+        const matchCli = LISTA_CLIENTES.find((cli) => {
+          const cliNorm = normalizarTexto(cli);
+          if (cliNorm === 'cliente avulso' || cliNorm === 'varejo') return false;
+          return linhaNorm.includes(cliNorm) || cliNorm.includes(linhaNorm);
+        });
+
+        if (matchCli) {
+          clienteEncontrado = matchCli;
+          break;
+        }
+      }
+
+      // Se não achar no texto interno, tenta pelo nome do ficheiro
+      if (!clienteEncontrado) {
+        const nomeLimpo = fileName
+          .replace(/\.pdf$/i, '')
+          .replace(/_Orcamento_.*$/i, '')
+          .replace(/_Proposta_.*$/i, '');
+        const nomeLimpoNorm = normalizarTexto(nomeLimpo);
+
+        clienteEncontrado = LISTA_CLIENTES.find((cli) => {
+          const cliNorm = normalizarTexto(cli);
+          if (!cliNorm || !nomeLimpoNorm) return false;
+          if (cliNorm.includes(nomeLimpoNorm) || nomeLimpoNorm.includes(cliNorm)) return true;
+          const palavrasCli = cliNorm.split(' ').filter((p) => p.length >= 2);
+          const palavrasFile = nomeLimpoNorm.split(' ').filter((p) => p.length >= 2);
+          const palavrasComuns = palavrasCli.filter((p) => palavrasFile.includes(p));
+          return palavrasComuns.length >= 2 || (palavrasComuns.length === 1 && palavrasCli.length <= 2);
+        }) || null;
+      }
+
+      if (clienteEncontrado) {
+        setCliente(clienteEncontrado);
+      }
+
       const itensMapeados: ItemVenda[] = [];
 
       linhasTexto.forEach((linha) => {
-        const linhaNorm = linha.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const linhaNorm = normalizarTexto(linha);
         if (linhaNorm.includes('total') || linhaNorm.includes('desconto')) return;
 
         produtos.forEach((prod) => {
           if (itensMapeados.some(i => i.produto_id === prod.id)) return;
 
-          const nomeP = prod.nome.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-          const palavrasChave = nomeP.split(' ').filter(p => p.length > 2);
+          const nomeP = normalizarTexto(prod.nome);
+          const palavrasChave = nomeP.split(' ').filter(p => p.length >= 2);
           if (palavrasChave.length === 0) return;
 
           const matchCompleto = palavrasChave.every(palavra => linhaNorm.includes(palavra));
 
           if (matchCompleto) {
             const numerosEncontrados = linha.match(/(\d{1,3}(?:\.\d{3})*,\d{2})|(\d+)/g);
-
             let quantidade = 1;
 
             if (numerosEncontrados && numerosEncontrados.length > 0) {
               const nums = numerosEncontrados.map(n => parseFloat(n.replace(/\./g, '').replace(',', '.')));
-              
               const qtdCandidata = nums.find(n => n > 0 && n < 1000);
               if (qtdCandidata !== undefined) {
                 quantidade = qtdCandidata;
               }
             }
 
-            const precoUnitario = prod.preco_venda;
+            let precoUnitario = prod.preco_venda;
+            const precosNoPdf = linha.match(/(\d{1,3}(?:\.\d{3})*,\d{2})/g);
+            if (precosNoPdf && precosNoPdf.length >= 1) {
+              const precoExtraido = parseFloat(precosNoPdf[0].replace(/\./g, '').replace(',', '.'));
+              if (!isNaN(precoExtraido) && precoExtraido > 0) {
+                precoUnitario = precoExtraido;
+              }
+            }
+
             const subtotal = quantidade * precoUnitario;
 
             itensMapeados.push({
@@ -302,7 +341,12 @@ export default function NovaVendaPage() {
 
       if (itensMapeados.length > 0) {
         setItens(itensMapeados);
-        alert(`PDF importado com sucesso!\nCliente: ${clienteEncontrado || 'Detectado'}\nDesconto: R$ ${descontoEncontrado}\n${itensMapeados.length} item(ns) importados.`);
+        alert(
+          `PDF importado com sucesso!\n\n` +
+          `• Cliente: ${clienteEncontrado || 'Não identificado (mantido Avulso)'}\n` +
+          `• Desconto: R$ ${descontoEncontrado}\n` +
+          `• Itens importados: ${itensMapeados.length}`
+        );
       } else {
         alert("Não foi possível extrair os itens com exatidão. Adicione-os manualmente abaixo.");
       }
@@ -510,7 +554,7 @@ export default function NovaVendaPage() {
         ]);
         
         if (movError) {
-          throw new Error(`Erro ao registar movimentação de venda para o produto ${item.nome}: ${movError.message}`);
+          throw new Error(`Erro ao registar movimentação para o produto ${item.nome}: ${movError.message}`);
         }
       }
 
