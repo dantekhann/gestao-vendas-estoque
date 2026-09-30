@@ -32,7 +32,7 @@ export default function MovimentarEstoquePage() {
       const { data, error } = await supabase
         .from('produtos')
         .select('id, nome, sku, estoque_atual')
-        .eq('ativo', true) // Filtra apenas os produtos ativos
+        .eq('ativo', true)
         .order('nome', { ascending: true });
 
       if (error) throw error;
@@ -72,35 +72,51 @@ export default function MovimentarEstoquePage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    
+    // Trava rígida de duplo clique imediata
+    if (carregando) return;
+    setCarregando(true);
+
     if (!produtoSelecionado) {
       setErro('Selecione um produto da lista.');
+      setCarregando(false);
       return;
     }
     if (quantidade <= 0) {
       setErro('A quantidade deve ser maior que zero.');
+      setCarregando(false);
       return;
     }
 
     try {
-      setCarregando(true);
       setErro(null);
 
-      const estoqueAtual = Number(produtoSelecionado.estoque_atual) || 0;
+      // 1. Buscar o estoque REAL diretamente do banco no momento exato do clique
+      const { data: prodAtual, error: errBusca } = await supabase
+        .from('produtos')
+        .select('estoque_atual')
+        .eq('id', produtoSelecionado.id)
+        .single();
+
+      if (errBusca) throw errBusca;
+
+      const estoqueAtual = Number(prodAtual?.estoque_atual) || 0;
       let novoEstoque = estoqueAtual;
+      const qtdNum = Number(quantidade);
 
       if (tipo === 'ENTRADA') {
-        novoEstoque += Number(quantidade);
+        novoEstoque = estoqueAtual + qtdNum;
       } else if (tipo === 'SAIDA') {
-        novoEstoque -= Number(quantidade);
+        novoEstoque = estoqueAtual - qtdNum;
       } else if (tipo === 'AJUSTE') {
-        novoEstoque = Number(quantidade);
+        novoEstoque = qtdNum;
       }
 
       if (novoEstoque < 0) {
-        throw new Error('A operação resultaria num estoque negativo.');
+        throw new Error(`Estoque insuficiente. O estoque atual é de ${estoqueAtual} unidades.`);
       }
 
-      // 1. Atualizar estoque na tabela produtos
+      // 2. Atualizar o estoque na tabela produtos de forma direta
       const { error: errUpdate } = await supabase
         .from('produtos')
         .update({ estoque_atual: novoEstoque })
@@ -108,7 +124,7 @@ export default function MovimentarEstoquePage() {
 
       if (errUpdate) throw errUpdate;
 
-      // 2. Registar movimentação
+      // 3. Registar o histórico na tabela de movimentações
       const dataHoje = new Date().toISOString().split('T')[0];
       const obsComData = `[Data: ${dataHoje}] ${observacao}`.trim();
 
@@ -116,7 +132,7 @@ export default function MovimentarEstoquePage() {
         {
           produto_id: produtoSelecionado.id,
           tipo,
-          quantidade: tipo === 'AJUSTE' ? Math.abs(novoEstoque - estoqueAtual) : Number(quantidade),
+          quantidade: tipo === 'AJUSTE' ? Math.abs(novoEstoque - estoqueAtual) : qtdNum,
           observacao: obsComData,
         },
       ]);
