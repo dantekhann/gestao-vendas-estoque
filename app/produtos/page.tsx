@@ -27,7 +27,8 @@ export default function ProdutosAdminPage() {
   const [carregando, setCarregando] = useState<boolean>(true);
   const [erro, setErro] = useState<string | null>(null);
   const [filtroBusca, setFiltroBusca] = useState<string>('');
-  const [filtroStatus, setFiltroStatus] = useState<string>('todos'); // 'todos', 'ativos', 'inativos'
+  const [filtroStatus, setFiltroStatus] = useState<string>('todos');
+  const [filtroClassificacao, setFiltroClassificacao] = useState<string>('todas');
 
   // Estados para Adicionar Novo Produto
   const [novoNome, setNovoNome] = useState<string>('');
@@ -53,8 +54,8 @@ export default function ProdutosAdminPage() {
       const { data, error } = await supabase
         .from('produtos')
         .select('*')
-        .eq('classificacao', 'Produto Finalizado') // Filtra apenas os produtos finalizados direto na query[cite: 8]
-        .order('nome', { ascending: true });
+        .order('nome', { ascending: true })
+        .range(0, 999);
 
       if (error) throw error;
       if (data) setProdutos(data);
@@ -207,9 +208,16 @@ export default function ProdutosAdminPage() {
     const bateBusca = p.nome.toLowerCase().includes(filtroBusca.toLowerCase().trim());
     const isAtivo = p.ativo !== false;
 
-    if (filtroStatus === 'ativos') return bateBusca && isAtivo;
-    if (filtroStatus === 'inativos') return bateBusca && !isAtivo;
-    return bateBusca;
+    let passaStatus = true;
+    if (filtroStatus === 'ativos') passaStatus = isAtivo;
+    if (filtroStatus === 'inativos') passaStatus = !isAtivo;
+
+    let passaClassificacao = true;
+    if (filtroClassificacao !== 'todas') {
+      passaClassificacao = (p.classificacao || 'Produto Finalizado') === filtroClassificacao;
+    }
+
+    return bateBusca && passaStatus && passaClassificacao;
   });
 
   return (
@@ -222,12 +230,20 @@ export default function ProdutosAdminPage() {
             <h1 className="text-2xl font-bold text-white">Gestão de Produtos e Estoque</h1>
             <p className="text-sm text-slate-400">Controle de catálogo, preços e status - OrC Brasil</p>
           </div>
-          <Link
-            href="/"
-            className="px-4 py-2 text-sm font-medium bg-slate-800 text-slate-200 hover:bg-slate-700 rounded-lg transition-colors border border-slate-700"
-          >
-            ← Painel Principal
-          </Link>
+          <div className="flex gap-2">
+            <Link
+              href="/inventario/whatsapp"
+              className="px-4 py-2 text-sm font-medium bg-blue-600 text-white hover:bg-blue-500 rounded-lg shadow-sm transition-colors"
+            >
+              📱 Inventário WhatsApp
+            </Link>
+            <Link
+              href="/"
+              className="px-4 py-2 text-sm font-medium bg-slate-800 text-slate-200 hover:bg-slate-700 rounded-lg transition-colors border border-slate-700"
+            >
+              ← Painel Principal
+            </Link>
+          </div>
         </div>
 
         {/* Formulário Adicionar Novo Produto */}
@@ -298,20 +314,35 @@ export default function ProdutosAdminPage() {
 
         {/* Catálogo Atual e Filtros */}
         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-4">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+          <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3">
             <h2 className="text-lg font-semibold text-slate-200">
               Catálogo Atual ({produtos.length} itens)
             </h2>
-            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            <div className="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
+              {/* Filtro por Classificação */}
+              <select
+                value={filtroClassificacao}
+                onChange={(e) => setFiltroClassificacao(e.target.value)}
+                className="p-2 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="todas">Todas as Classificações</option>
+                {OPCOES_CLASSIFICACAO.map((opt) => (
+                  <option key={opt} value={opt}>{opt}</option>
+                ))}
+              </select>
+
+              {/* Filtro por Status */}
               <select
                 value={filtroStatus}
                 onChange={(e) => setFiltroStatus(e.target.value)}
                 className="p-2 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500"
               >
-                <option value="ativos">Apenas Ativos (Visíveis nas Vendas)</option>
-                <option value="inativos">Apenas Ocultos/Inativos</option>
-                <option value="todos">Todos os Produtos</option>
+                <option value="ativos">Apenas Ativos</option>
+                <option value="inativos">Apenas Ocultos</option>
+                <option value="todos">Todos os Status</option>
               </select>
+
+              {/* Input de Busca por Nome */}
               <input
                 type="text"
                 placeholder="Filtrar por nome..."
