@@ -27,8 +27,9 @@ export default function ProdutosAdminPage() {
   const [carregando, setCarregando] = useState<boolean>(true);
   const [erro, setErro] = useState<string | null>(null);
   const [filtroBusca, setFiltroBusca] = useState<string>('');
-  const [filtroStatus, setFiltroStatus] = useState<string>('todos');
+  const [filtroStatus, setFiltroStatus] = useState<string>('ativos');
   const [filtroClassificacao, setFiltroClassificacao] = useState<string>('todas');
+  const [filtroAlertaEstoque, setFiltroAlertaEstoque] = useState<boolean>(false); // Novo filtro para estoque baixo
 
   // Estados para Adicionar Novo Produto
   const [novoNome, setNovoNome] = useState<string>('');
@@ -217,8 +218,22 @@ export default function ProdutosAdminPage() {
       passaClassificacao = (p.classificacao || 'Produto Finalizado') === filtroClassificacao;
     }
 
-    return bateBusca && passaStatus && passaClassificacao;
+    let passaAlerta = true;
+    if (filtroAlertaEstoque) {
+      const atual = p.estoque_atual ?? 0;
+      const minimo = p.estoque_minimo ?? 0;
+      passaAlerta = atual <= minimo;
+    }
+
+    return bateBusca && passaStatus && passaClassificacao && passaAlerta;
   });
+
+  // Contagem de produtos em alerta para exibir no botão de filtro rápido
+  const totalEmAlerta = produtos.filter((p) => {
+    const atual = p.estoque_atual ?? 0;
+    const minimo = p.estoque_minimo ?? 0;
+    return atual <= minimo && (p.ativo !== false);
+  }).length;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 py-8 px-4 sm:px-6 lg:px-8">
@@ -228,7 +243,7 @@ export default function ProdutosAdminPage() {
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900 p-5 rounded-xl border border-slate-800 shadow-md">
           <div>
             <h1 className="text-2xl font-bold text-white">Gestão de Produtos e Estoque</h1>
-            <p className="text-sm text-slate-400">Controle de catálogo, preços e status - OrC Brasil</p>
+            <p className="text-sm text-slate-400">Controle de catálogo, preços e alertas preventivos - OrC Brasil</p>
           </div>
           <div className="flex gap-2">
             <Link
@@ -315,9 +330,25 @@ export default function ProdutosAdminPage() {
         {/* Catálogo Atual e Filtros */}
         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-4">
           <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3">
-            <h2 className="text-lg font-semibold text-slate-200">
-              Catálogo Atual ({produtos.length} itens)
-            </h2>
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-semibold text-slate-200">
+                Catálogo Atual ({produtosFiltrados.length} / {produtos.length} itens)
+              </h2>
+              {totalEmAlerta > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setFiltroAlertaEstoque(!filtroAlertaEstoque)}
+                  className={`px-3 py-1 rounded-full text-xs font-bold transition-all border cursor-pointer flex items-center gap-1.5 ${
+                    filtroAlertaEstoque 
+                      ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md ring-2 ring-amber-500/40' 
+                      : 'bg-amber-950/70 text-amber-400 border-amber-700/60 hover:bg-amber-900/80 animate-pulse'
+                  }`}
+                >
+                  ⚠️ {totalEmAlerta} {totalEmAlerta === 1 ? 'item em alerta' : 'itens em alerta'}
+                </button>
+              )}
+            </div>
+
             <div className="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
               {/* Filtro por Classificação */}
               <select
@@ -369,7 +400,7 @@ export default function ProdutosAdminPage() {
                     <th className="p-3.5">Nome do Item</th>
                     <th className="p-3.5">Classificação</th>
                     <th className="p-3.5">Preço (R$)</th>
-                    <th className="p-3.5 text-center">Estoque Atual</th>
+                    <th className="p-3.5 text-center">Estoque Atual / Mínimo</th>
                     <th className="p-3.5 text-center">Status</th>
                     <th className="p-3.5 text-center">Ações</th>
                   </tr>
@@ -388,15 +419,16 @@ export default function ProdutosAdminPage() {
                       const minimo = prod.estoque_minimo ?? 0;
                       const ativo = prod.ativo !== false;
 
+                      // Lógica visual robusta para o stock mínimo
                       let badgeEstoqueClass = 'bg-emerald-950/60 text-emerald-400 border-emerald-800/40';
                       let statusTexto = `${atual} un`;
 
                       if (atual <= 0) {
-                        badgeEstoqueClass = 'bg-red-950/65 text-red-400 border-red-800/40';
-                        statusTexto = `${atual} un (Zerado)`;
+                        badgeEstoqueClass = 'bg-red-950/80 text-red-300 border-red-700/60 shadow-sm animate-pulse';
+                        statusTexto = `🚨 ${atual} un (Zerado)`;
                       } else if (atual <= minimo) {
-                        badgeEstoqueClass = 'bg-amber-950/65 text-amber-400 border-amber-800/40';
-                        statusTexto = `${atual} un (Baixo)`;
+                        badgeEstoqueClass = 'bg-amber-950/80 text-amber-300 border-amber-700/60 shadow-sm';
+                        statusTexto = `⚠️ ${atual} un (Mín: ${minimo})`;
                       }
 
                       return (
@@ -449,19 +481,35 @@ export default function ProdutosAdminPage() {
                             )}
                           </td>
 
-                          {/* Estoque Atual */}
+                          {/* Estoque Atual com Indicador de Mínimo */}
                           <td className="p-3.5 text-center">
                             {estaEditando ? (
-                              <input
-                                type="number"
-                                value={editEstoque}
-                                onChange={(e) => setEditEstoque(e.target.value)}
-                                className="w-20 p-1.5 border border-blue-500 rounded bg-slate-950 text-white text-sm outline-none text-center mx-auto block"
-                              />
+                              <div className="flex items-center justify-center gap-2">
+                                <input
+                                  type="number"
+                                  placeholder="Atual"
+                                  value={editEstoque}
+                                  onChange={(e) => setEditEstoque(e.target.value)}
+                                  className="w-20 p-1.5 border border-blue-500 rounded bg-slate-950 text-white text-sm outline-none text-center"
+                                />
+                                <span className="text-xs text-slate-400">Mín:</span>
+                                <input
+                                  type="number"
+                                  placeholder="Mín."
+                                  value={editEstoqueMinimo}
+                                  onChange={(e) => setEditEstoqueMinimo(e.target.value)}
+                                  className="w-16 p-1.5 border border-blue-500 rounded bg-slate-950 text-white text-sm outline-none text-center"
+                                />
+                              </div>
                             ) : (
-                              <span className={`inline-block px-2.5 py-1 rounded-md border text-xs font-bold ${badgeEstoqueClass}`}>
-                                {statusTexto}
-                              </span>
+                              <div className="flex flex-col items-center gap-0.5">
+                                <span className={`inline-block px-2.5 py-1 rounded-md border text-xs font-bold ${badgeEstoqueClass}`}>
+                                  {statusTexto}
+                                </span>
+                                {minimo > 0 && atual > minimo && (
+                                  <span className="text-[10px] text-slate-400">Estoque mínimo: {minimo}</span>
+                                )}
+                              </div>
                             )}
                           </td>
 
