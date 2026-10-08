@@ -30,27 +30,27 @@ export default function InventarioWhatsAppPage() {
   const [erro, setErro] = useState<string | null>(null);
 
   useEffect(() => {
+    async function carregarProdutos() {
+      try {
+        setCarregando(true);
+        const { data, error } = await supabase
+          .from('produtos')
+          .select('id, nome, estoque_atual')
+          .order('nome', { ascending: true })
+          .range(0, 999);
+
+        if (error) throw error;
+        if (data) setProdutos(data);
+      } catch (err: unknown) {
+        const errObj = err as Record<string, unknown>;
+        setErro((errObj?.message as string) || 'Erro ao carregar produtos.');
+      } finally {
+        setCarregando(false);
+      }
+    }
+
     carregarProdutos();
   }, []);
-
-  async function carregarProdutos() {
-    try {
-      setCarregando(true);
-      const { data, error } = await supabase
-        .from('produtos')
-        .select('id, nome, estoque_atual')
-        .order('nome', { ascending: true })
-        .range(0, 999);
-
-      if (error) throw error;
-      if (data) setProdutos(data);
-    } catch (err: unknown) {
-      const errObj = err as Record<string, unknown>;
-      setErro((errObj?.message as string) || 'Erro ao carregar produtos.');
-    } finally {
-      setCarregando(false);
-    }
-  }
 
   const extrairQuantidadeComExtenso = (texto: string): { quantidade: number; textoRestante: string } => {
     let textoLower = texto.toLowerCase().trim();
@@ -120,9 +120,9 @@ export default function InventarioWhatsAppPage() {
       qtd = Math.round(qtd);
       if (!txtProd || txtProd.length < 2) return;
 
-      let textoCorrigido = txtProd.replace(/\bgeo\b/gi, 'gel');
+      const textoCorrigido = txtProd.replace(/\bgeo\b/gi, 'gel');
 
-      let textoTratado = textoCorrigido
+      const textoTratado = textoCorrigido
         .replace(/^(?:\d+\s*)?(?:kg|l|pct|pacote|ml|gr|g|un|cxs|cx)\b\.?/gi, '')
         .replace(/\b(?:pct|pacote|kg|ml|cxs|cx|un|rolos|bags|frascos|und)\b\.?/gi, '')
         .replace(/(?:\b\d+[\d\.,]*\s*)?\b[lL]\b\.?(?=\s|$)/g, '')
@@ -283,7 +283,7 @@ export default function InventarioWhatsAppPage() {
       }
 
       linhaLimpa = linhaLimpa.replace(/^[-*•]\s*/, '');
-      let linhaParaProcessar = linhaLimpa.replace(/%%/g, '%');
+      const linhaParaProcessar = linhaLimpa.replace(/%%/g, '%');
 
       if (linhaParaProcessar.includes('+')) {
         const pedacos = linhaParaProcessar.split('+');

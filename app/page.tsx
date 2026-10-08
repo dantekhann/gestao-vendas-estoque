@@ -145,6 +145,12 @@ export default function EstoquePage() {
               <span>📦</span> Lançar Entrada
             </button>
             <button
+              onClick={() => router.push('/produtos')}
+              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold rounded-xl border border-slate-700 transition-colors cursor-pointer flex items-center gap-2"
+            >
+              <span>🗂️</span> Produtos e Pedidos
+            </button>
+            <button
               onClick={() => router.push('/vendas/lancar')}
               className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-xl shadow-lg transition-colors cursor-pointer flex items-center gap-2"
             >

@@ -77,12 +77,12 @@ export default function ProdutosAdminPage() {
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [pedidosTransito, setPedidosTransito] = useState<PedidoTransito[]>([]);
   const [carregando, setCarregando] = useState<boolean>(true);
-  const [erro, setErro] = useState<string | null>(null);
+  const [, setErro] = useState<string | null>(null);
   
   const [filtroBusca, setFiltroBusca] = useState<string>('');
-  const [filtroStatus, setFiltroStatus] = useState<string>('ativos');
+  const [filtroStatus] = useState<string>('ativos');
   const [filtroClassificacao, setFiltroClassificacao] = useState<string>('todas');
-  const [filtroAlertaEstoque, setFiltroAlertaEstoque] = useState<boolean>(false);
+  const [filtroAlertaEstoque] = useState<boolean>(false);
   
   const [painelReposicaoAberto, setPainelReposicaoAberto] = useState<boolean>(false);
   const [secaoTransitoAberta, setSecaoTransitoAberta] = useState<boolean>(true);
