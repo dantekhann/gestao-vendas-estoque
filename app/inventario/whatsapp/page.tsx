@@ -108,6 +108,9 @@ export default function InventarioWhatsAppPage() {
       .trim();
   };
 
+  const normalizarTextoGeral = (str: string) => 
+    str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+
   const processarTexto = () => {
     if (!textoWhatsApp.trim()) {
       alert('Cole o texto da lista do WhatsApp primeiro.');
@@ -132,11 +135,8 @@ export default function InventarioWhatsAppPage() {
         .replace(/\s+/g, ' ')
         .trim();
 
-      const normalizar = (str: string) => 
-        str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
-
-      const tNorm = normalizar(textoTratado);
-      const tOrigLower = normalizar(textoOrig);
+      const tNorm = normalizarTextoGeral(textoTratado);
+      const tOrigLower = normalizarTextoGeral(textoOrig);
 
       let nomeOficialSugerido = '';
 
@@ -223,17 +223,17 @@ export default function InventarioWhatsAppPage() {
       let produtoEncontrado = null;
 
       if (nomeOficialSugerido) {
-        produtoEncontrado = produtos.find(p => normalizar(p.nome) === normalizar(nomeOficialSugerido));
+        produtoEncontrado = produtos.find(p => normalizarTextoGeral(p.nome) === normalizarTextoGeral(nomeOficialSugerido));
       }
 
       if (!produtoEncontrado && tNorm.includes('cravo') && tNorm.includes('essencia')) {
         produtoEncontrado = produtos.find(p => {
-          const pNorm = normalizar(p.nome);
+          const pNorm = normalizarTextoGeral(p.nome);
           return pNorm.includes('essencia') && pNorm.includes('cravo');
         });
       } else if (!produtoEncontrado && (tNorm.includes('rot.') || tNorm.includes('rotulo'))) {
         produtoEncontrado = produtos.find(p => {
-          const pNorm = normalizar(p.nome);
+          const pNorm = normalizarTextoGeral(p.nome);
           return pNorm.includes('rotulo') && (
             (tNorm.includes('bambu') && pNorm.includes('bambu')) ||
             (tNorm.includes('capim') && pNorm.includes('capim')) ||
@@ -244,25 +244,30 @@ export default function InventarioWhatsAppPage() {
         });
       } else if (!produtoEncontrado && tNorm.includes('pote') && tNorm.includes('bolado')) {
         produtoEncontrado = produtos.find(p => {
-          const pNorm = normalizar(p.nome);
+          const pNorm = normalizarTextoGeral(p.nome);
           return pNorm.includes('pote') && pNorm.includes('bolado');
         });
       }
 
       if (!produtoEncontrado) {
         produtoEncontrado = produtos.find((p) => {
-          const pNorm = normalizar(p.nome);
+          const pNorm = normalizarTextoGeral(p.nome);
           return pNorm === tNorm || pNorm.includes(tNorm) || tNorm.includes(pNorm);
         });
       }
 
       const nomeFinalCatalogo = produtoEncontrado ? produtoEncontrado.nome : nomeOficialSugerido;
       const encontradoOficial = !!produtoEncontrado;
+      const nomeFinalNorm = normalizarTextoGeral(nomeFinalCatalogo);
 
-      const itemExistente = resultados.find((r) => r.nomeCatalogo.toLowerCase() === nomeFinalCatalogo.toLowerCase());
+      // Prevenção estrita de duplicados comparando o nome normalizado na lista processada
+      const itemExistente = resultados.find((r) => normalizarTextoGeral(r.nomeCatalogo) === nomeFinalNorm);
+      
       if (itemExistente) {
         itemExistente.quantidade_contada += qtd;
-        itemExistente.diferenca = produtoEncontrado ? itemExistente.quantidade_contada - produtoEncontrado.estoque_atual : itemExistente.quantidade_contada;
+        itemExistente.diferenca = itemExistente.produto_id 
+          ? itemExistente.quantidade_contada - itemExistente.estoque_antigo 
+          : itemExistente.quantidade_contada;
       } else {
         resultados.push({
           produto_id: produtoEncontrado?.id,
@@ -427,7 +432,7 @@ export default function InventarioWhatsAppPage() {
         <div className="flex justify-between items-center bg-slate-900 p-5 rounded-xl border border-slate-800 shadow-md">
           <div>
             <h1 className="text-2xl font-bold text-white">Inventário Rápido via WhatsApp</h1>
-            <p className="text-sm text-slate-400">Mapeamento Inteligente de Rótulos e Potes</p>
+            <p className="text-sm text-slate-400">Mapeamento Inteligente com Prevenção de Duplicados</p>
           </div>
           <button
             type="button"
@@ -468,7 +473,7 @@ export default function InventarioWhatsAppPage() {
         {itensProcessados.length > 0 && (
           <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-4">
             <h2 className="text-xs font-semibold tracking-wider text-slate-400 uppercase">
-              Pré-visualização do Mapeamento ({itensProcessados.length} itens)
+              Pré-visualização do Mapeamento ({itensProcessados.length} itens únicos)
             </h2>
 
             <div className="overflow-x-auto max-h-96">
@@ -477,7 +482,7 @@ export default function InventarioWhatsAppPage() {
                   <tr>
                     <th className="p-3">Texto Original (WhatsApp)</th>
                     <th className="p-3">Nome Normalizado no Sistema</th>
-                    <th className="p-3 text-center">Contagem</th>
+                    <th className="p-3 text-center">Contagem Consolidada</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
