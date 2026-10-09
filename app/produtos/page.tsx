@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { z } from 'zod';
 import { supabase } from '@/lib/supabase';
+import { formatarData } from '@/lib/formatters';
 
 // Esquema de validação com Zod
 const produtoSchema = z.object({
@@ -29,17 +30,25 @@ interface Produto {
   ativo?: boolean;
 }
 
-interface PedidoTransito {
+interface EntregaParcial {
+  id: string;
+  pedido_id: string;
+  quantidade_entregue: number;
+  data_recebimento: string;
+  observacao?: string;
+}
+
+interface Pedido {
   id: string;
   produto_id: string;
-  quantidade: number;
+  quantidade_total: number;
+  quantidade_recebida: number;
   data_pedido: string;
-  prazo_min: number;
-  prazo_max: number;
+  previsao_entrega?: string;
   status: string;
-  produtos?: {
-    nome: string;
-  };
+  observacao?: string;
+  produtos?: Produto | Produto[] | null;
+  entregas_parciais?: EntregaParcial[];
 }
 
 const OPCOES_CLASSIFICACAO = [
@@ -50,32 +59,9 @@ const OPCOES_CLASSIFICACAO = [
   'EPI'
 ];
 
-const OPCOES_STATUS_PEDIDO = [
-  'Em Trânsito',
-  'Atenção / Atrasado',
-  'Aguardando Confirmação'
-];
-
-// Função auxiliar para calcular data prevista em dias úteis
-function calcularDataPrevista(dataPedidoStr: string, diasUteis: number): string {
-  if (!dataPedidoStr) return '-';
-  const data = new Date(dataPedidoStr + 'T00:00:00');
-  let diasAdicionados = 0;
-
-  while (diasAdicionados < diasUteis) {
-    data.setDate(data.getDate() + 1);
-    const diaSemana = data.getDay();
-    if (diaSemana !== 0 && diaSemana !== 6) {
-      diasAdicionados++;
-    }
-  }
-
-  return data.toLocaleDateString('pt-BR');
-}
-
 export default function ProdutosAdminPage() {
   const [produtos, setProdutos] = useState<Produto[]>([]);
-  const [pedidosTransito, setPedidosTransito] = useState<PedidoTransito[]>([]);
+  const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [carregando, setCarregando] = useState<boolean>(true);
   const [, setErro] = useState<string | null>(null);
   
@@ -97,7 +83,7 @@ export default function ProdutosAdminPage() {
   const [novoPrazoMax, setNovoPrazoMax] = useState<string>('7');
   const [salvandoNovo, setSalvandoNovo] = useState<boolean>(false);
 
-  // Estados para Registo de Pedido (Autocomplete / Busca por digitação)
+  // Estados para Registo de Pedido (Autocomplete)
   const [produtoSelecionadoId, setProdutoSelecionadoId] = useState<string>('');
   const [textoBuscaProduto, setTextoBuscaProduto] = useState<string>('');
   const [mostrarDropdownBusca, setMostrarDropdownBusca] = useState<boolean>(false);
@@ -105,10 +91,20 @@ export default function ProdutosAdminPage() {
 
   const [qtdPedido, setQtdPedido] = useState<string>('100');
   const [dataPedidoInput, setDataPedidoInput] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [prazoMinManual, setPrazoMinManual] = useState<string>('5');
-  const [prazoMaxManual, setPrazoMaxManual] = useState<string>('7');
-  const [statusPedidoInput, setStatusPedidoInput] = useState<string>('Em Trânsito');
+  const [previsaoInput, setPrevisaoInput] = useState<string>('09/10/2026 até 12/10/2026');
   const [salvandoPedido, setSalvandoPedido] = useState<boolean>(false);
+
+  // Estados para Expansão e Recebimento Parcial
+  const [pedidosExpandidos, setPedidosExpandidos] = useState<Record<string, boolean>>({});
+  const [modalRecebimentoAberto, setModalRecebimentoAberto] = useState<boolean>(false);
+  const [pedidoSelecionadoRecebimento, setPedidoSelecionadoRecebimento] = useState<Pedido | null>(null);
+  const [quantidadeParcialReceber, setQuantidadeParcialReceber] = useState<string>('');
+  const [dataRecebimentoParcial, setDataRecebimentoParcial] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [obsRecebimentoParcial, setObsRecebimentoParcial] = useState<string>('');
+
+  // Estado do Modal de Histórico
+  const [modalHistoricoAberto, setModalHistoricoAberto] = useState<boolean>(false);
+  const [historicoExpandidos, setHistoricoExpandidos] = useState<Record<string, boolean>>({});
 
   // Estados para Edição Inline
   const [editandoId, setEditandoId] = useState<string | null>(null);
@@ -127,16 +123,16 @@ export default function ProdutosAdminPage() {
 
       const [resProdutos, resPedidos] = await Promise.all([
         supabase.from('produtos').select('*').order('nome', { ascending: true }).range(0, 999),
-        supabase.from('pedidos_transito').select('*, produtos(nome)').order('data_pedido', { ascending: false })
+        supabase.from('pedidos').select('*, produtos (id, nome, estoque_atual), entregas_parciais (*)').order('data_pedido', { ascending: false })
       ]);
 
       if (resProdutos.error) throw resProdutos.error;
       if (resProdutos.data) setProdutos(resProdutos.data);
 
       if (resPedidos.error) {
-        console.warn('Aviso pedidos_transito:', resPedidos.error.message);
+        console.warn('Aviso pedidos:', resPedidos.error.message);
       } else if (resPedidos.data) {
-        setPedidosTransito(resPedidos.data);
+        setPedidos(resPedidos.data);
       }
     } catch (err: unknown) {
       const errorObj = err as { message?: string };
@@ -155,7 +151,6 @@ export default function ProdutosAdminPage() {
     return () => { isMounted = false; };
   }, [carregarDados]);
 
-  // Fechar dropdown de busca ao clicar fora
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -169,14 +164,20 @@ export default function ProdutosAdminPage() {
   const selecionarProdutoAutocomplete = (prod: Produto) => {
     setProdutoSelecionadoId(prod.id);
     setTextoBuscaProduto(prod.nome);
-    setPrazoMinManual(String(prod.prazo_entrega_min ?? 5));
-    setPrazoMaxManual(String(prod.prazo_entrega_max ?? 7));
     setMostrarDropdownBusca(false);
   };
 
   const produtosFiltradosAutocomplete = produtos.filter(p => 
     p.nome.toLowerCase().includes(textoBuscaProduto.toLowerCase().trim())
   );
+
+  const toggleExpandirPedido = (pedidoId: string) => {
+    setPedidosExpandidos((prev) => ({ ...prev, [pedidoId]: !prev[pedidoId] }));
+  };
+
+  const toggleExpandirHistorico = (pedidoId: string) => {
+    setHistoricoExpandidos((prev) => ({ ...prev, [pedidoId]: !prev[pedidoId] }));
+  };
 
   const handleAdicionarProduto = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -208,8 +209,6 @@ export default function ProdutosAdminPage() {
       setNovoPreco('0.00');
       setNovoEstoque('0');
       setNovoEstoqueMinimo('0');
-      setNovoPrazoMin('5');
-      setNovoPrazoMax('7');
       await carregarDados();
       alert('Produto adicionado com sucesso!');
     } catch (err: unknown) {
@@ -229,13 +228,13 @@ export default function ProdutosAdminPage() {
 
     try {
       setSalvandoPedido(true);
-      const { error } = await supabase.from('pedidos_transito').insert([{
+      const { error } = await supabase.from('pedidos').insert([{
         produto_id: produtoSelecionadoId,
-        quantidade: parseInt(qtdPedido, 10) || 1,
+        quantidade_total: parseFloat(qtdPedido) || 1,
+        quantidade_recebida: 0,
         data_pedido: dataPedidoInput,
-        prazo_min: parseInt(prazoMinManual, 10) || 0,
-        prazo_max: parseInt(prazoMaxManual, 10) || 0,
-        status: statusPedidoInput
+        previsao_entrega: previsaoInput || null,
+        status: 'Em Trânsito'
       }]);
 
       if (error) throw error;
@@ -253,37 +252,71 @@ export default function ProdutosAdminPage() {
     }
   };
 
-  const concluirPedido = async (id: string) => {
-    if (!window.confirm('Deseja marcar este pedido como entregue? (Isto atualizará o stock automaticamente)')) return;
+  const handleConfirmarRecebimentoParcial = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pedidoSelecionadoRecebimento || !quantidadeParcialReceber) return;
+
+    const qtdNum = parseFloat(quantidadeParcialReceber);
+    if (isNaN(qtdNum) || qtdNum <= 0) {
+      alert('Insira uma quantidade válida.');
+      return;
+    }
 
     try {
-      const pedido = pedidosTransito.find(p => p.id === id);
-      if (!pedido) return;
+      const { error } = await supabase.rpc('registrar_recebimento_parcial', {
+        p_pedido_id: pedidoSelecionadoRecebimento.id,
+        p_quantidade: qtdNum,
+        p_data_recebimento: dataRecebimentoParcial,
+        p_observacao: obsRecebimentoParcial || 'Recebimento parcial de lote',
+      });
 
-      const prod = produtos.find(p => p.id === pedido.produto_id);
-      const novoEstoqueAtual = (prod?.estoque_atual ?? 0) + pedido.quantidade;
-
-      await supabase.from('produtos').update({ estoque_atual: novoEstoqueAtual }).eq('id', pedido.produto_id);
-      const { error } = await supabase.from('pedidos_transito').delete().eq('id', id);
       if (error) throw error;
 
+      alert('Recebimento parcial registado e stock atualizado com sucesso!');
+      setModalRecebimentoAberto(false);
+      setPedidoSelecionadoRecebimento(null);
+      setQuantidadeParcialReceber('');
+      setObsRecebimentoParcial('');
       await carregarDados();
-      alert('Pedido concluído e stock atualizado com sucesso!');
     } catch (err: unknown) {
       const errorObj = err as { message?: string };
-      alert(`Erro ao concluir pedido: ${errorObj.message}`);
+      alert('Erro ao registar recebimento: ' + (errorObj?.message || 'Erro desconhecido'));
     }
   };
 
-  const cancelarPedido = async (id: string) => {
-    if (!window.confirm('Tem certeza que deseja cancelar e remover este pedido da lista?')) return;
+  const handleReceberTotalDireto = async (pedido: Pedido) => {
+    const saldoPendente = pedido.quantidade_total - (pedido.quantidade_recebida || 0);
+    if (saldoPendente <= 0) return;
+
+    const confirmar = window.confirm(`Confirmar o recebimento total do saldo pendente (${saldoPendente} unidades)?`);
+    if (!confirmar) return;
 
     try {
-      const { error } = await supabase.from('pedidos_transito').delete().eq('id', id);
+      const { error } = await supabase.rpc('registrar_recebimento_parcial', {
+        p_pedido_id: pedido.id,
+        p_quantidade: saldoPendente,
+        p_data_recebimento: new Date().toISOString().split('T')[0],
+        p_observacao: 'Recebimento total direto',
+      });
+
       if (error) throw error;
 
+      alert('Pedido marcado como totalmente recebido e stock atualizado!');
       await carregarDados();
-      alert('Pedido cancelado com sucesso!');
+    } catch (err: unknown) {
+      const errorObj = err as { message?: string };
+      alert('Erro: ' + (errorObj?.message || 'Erro desconhecido'));
+    }
+  };
+
+  const handleCancelarPedido = async (pedidoId: string) => {
+    const confirmar = window.confirm('Tem certeza que deseja cancelar este pedido?');
+    if (!confirmar) return;
+
+    try {
+      const { error } = await supabase.from('pedidos').update({ status: 'Cancelado' }).eq('id', pedidoId);
+      if (error) throw error;
+      await carregarDados();
     } catch (err: unknown) {
       const errorObj = err as { message?: string };
       alert(`Erro ao cancelar pedido: ${errorObj.message}`);
@@ -366,6 +399,11 @@ export default function ProdutosAdminPage() {
     navigator.clipboard.writeText(cabecalho);
     alert('Lista de reposição copiada para a área de transferência!');
   };
+
+  // Separação: Apenas pedidos ativos (Em Trânsito / Parcialmente Recebido) ficam na tabela principal
+  const pedidosAtivos = pedidos.filter(p => p.status !== 'Recebido' && p.status !== 'Cancelado');
+  // Histórico: Pedidos concluídos ou cancelados
+  const pedidosHistorico = pedidos.filter(p => p.status === 'Recebido' || p.status === 'Cancelado');
 
   const produtosFiltrados = produtos.filter((p) => {
     const bateBusca = p.nome.toLowerCase().includes(filtroBusca.toLowerCase().trim());
@@ -463,14 +501,27 @@ export default function ProdutosAdminPage() {
 
         {/* SECÇÃO: LOGÍSTICA & PEDIDOS EM TRÂNSITO */}
         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-4">
-          <div className="flex justify-between items-center">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
             <div>
-              <h2 className="text-lg font-semibold text-slate-200">📦 Logística & Pedidos em Trânsito</h2>
-              <p className="text-xs text-slate-400">Controlo detalhado de encomendas, prazos úteis e situação atual</p>
+              <h2 className="text-lg font-semibold text-slate-200">📦 Logística & Pedidos Ativos</h2>
+              <p className="text-xs text-slate-400">Controlo de encomendas em trânsito e parciais</p>
             </div>
-            <button type="button" onClick={() => setSecaoTransitoAberta(!secaoTransitoAberta)} className="px-3.5 py-2 text-xs font-semibold bg-blue-600/30 hover:bg-blue-600/50 text-blue-300 border border-blue-500/40 rounded-lg transition-colors cursor-pointer">
-              {secaoTransitoAberta ? 'Ocultar Módulo' : 'Registar / Ver Pedidos'}
-            </button>
+            <div className="flex gap-2">
+              <button 
+                type="button" 
+                onClick={() => setModalHistoricoAberto(true)} 
+                className="px-3.5 py-2 text-xs font-semibold bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5"
+              >
+                📜 Ver Histórico ({pedidosHistorico.length})
+              </button>
+              <button 
+                type="button" 
+                onClick={() => setSecaoTransitoAberta(!secaoTransitoAberta)} 
+                className="px-3.5 py-2 text-xs font-semibold bg-blue-600/30 hover:bg-blue-600/50 text-blue-300 border border-blue-500/40 rounded-lg transition-colors cursor-pointer"
+              >
+                {secaoTransitoAberta ? 'Ocultar Módulo' : 'Registar Pedido'}
+              </button>
+            </div>
           </div>
 
           {secaoTransitoAberta && (
@@ -540,40 +591,16 @@ export default function ProdutosAdminPage() {
                     />
                   </div>
 
-                  {/* Prazo Mínimo Manual */}
-                  <div>
-                    <label className="block text-xs font-medium text-slate-400 mb-1">Prazo Mínimo (Dias Úteis)</label>
-                    <input 
-                      type="number" 
-                      value={prazoMinManual} 
-                      onChange={(e) => setPrazoMinManual(e.target.value)} 
-                      className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-900 text-slate-100 text-sm outline-none focus:border-blue-500 text-center" 
-                    />
-                  </div>
-
-                  {/* Prazo Máximo Manual */}
-                  <div>
-                    <label className="block text-xs font-medium text-slate-400 mb-1">Prazo Máximo (Dias Úteis)</label>
-                    <input 
-                      type="number" 
-                      value={prazoMaxManual} 
-                      onChange={(e) => setPrazoMaxManual(e.target.value)} 
-                      className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-900 text-slate-100 text-sm outline-none focus:border-blue-500 text-center" 
-                    />
-                  </div>
-
-                  {/* Situação / Status do Pedido */}
+                  {/* Previsão */}
                   <div className="sm:col-span-2">
-                    <label className="block text-xs font-medium text-slate-400 mb-1">Situação do Pedido</label>
-                    <select 
-                      value={statusPedidoInput} 
-                      onChange={(e) => setStatusPedidoInput(e.target.value)} 
-                      className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-900 text-slate-100 text-sm outline-none focus:border-blue-500"
-                    >
-                      {OPCOES_STATUS_PEDIDO.map(st => (
-                        <option key={st} value={st}>{st}</option>
-                      ))}
-                    </select>
+                    <label className="block text-xs font-medium text-slate-400 mb-1">Previsão (Texto ou Datas)</label>
+                    <input 
+                      type="text" 
+                      value={previsaoInput} 
+                      onChange={(e) => setPrevisaoInput(e.target.value)} 
+                      placeholder="Ex: 09/10/2026 até 12/10/2026"
+                      className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-900 text-slate-100 text-sm outline-none focus:border-blue-500" 
+                    />
                   </div>
 
                   {/* Botão de Submissão */}
@@ -589,50 +616,119 @@ export default function ProdutosAdminPage() {
                 </div>
               </form>
 
-              {/* Tabela de Pedidos em Trânsito com Ação de Cancelar */}
+              {/* Tabela de Pedidos Ativos */}
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="border-b border-slate-800 bg-slate-950/50 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                      <th className="p-3 w-10"></th>
                       <th className="p-3">Item Encomendado</th>
-                      <th className="p-3 text-center">Qtd</th>
-                      <th className="p-3 text-center">Data Pedido</th>
-                      <th className="p-3 text-center">Situação</th>
-                      <th className="p-3 text-center">Previsão (Úteis)</th>
+                      <th className="p-3 text-center">Qtd Total / Recebida</th>
+                      <th className="p-3">Data Pedido</th>
+                      <th className="p-3">Situação</th>
+                      <th className="p-3">Previsão</th>
                       <th className="p-3 text-center">Ações</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60 text-sm">
-                    {pedidosTransito.length === 0 ? (
-                      <tr><td colSpan={6} className="text-center p-6 text-slate-500">Nenhum pedido em trânsito registado no momento.</td></tr>
+                    {pedidosAtivos.length === 0 ? (
+                      <tr><td colSpan={7} className="text-center p-6 text-slate-500">Nenhum pedido ativo no momento. (Ver histórico para concluídos)</td></tr>
                     ) : (
-                      pedidosTransito.map((ped) => {
-                        const dataMinFormatada = calcularDataPrevista(ped.data_pedido, ped.prazo_min);
-                        const dataMaxFormatada = calcularDataPrevista(ped.data_pedido, ped.prazo_max);
-                        const previsaoTexto = ped.prazo_min === ped.prazo_max ? dataMinFormatada : `${dataMinFormatada} até ${dataMaxFormatada}`;
+                      pedidosAtivos.map((pedido) => {
+                        const isExpandido = !!pedidosExpandidos[pedido.id];
+                        const temParciais = pedido.entregas_parciais && pedido.entregas_parciais.length > 0;
+                        const qtdTotal = pedido.quantidade_total;
+                        const qtdRecebida = pedido.quantidade_recebida || 0;
 
-                        const corStatus = ped.status === 'Atenção / Atrasado' ? 'bg-rose-950 text-rose-300 border-rose-800' : 'bg-blue-950 text-blue-300 border-blue-800';
+                        const nomeProd = Array.isArray(pedido.produtos)
+                          ? pedido.produtos[0]?.nome
+                          : pedido.produtos?.nome;
+
+                        const badgeStatus =
+                          pedido.status === 'Parcialmente Recebido'
+                            ? 'bg-blue-950/60 border-blue-800 text-blue-400'
+                            : 'bg-amber-950/60 border-amber-800 text-amber-400';
 
                         return (
-                          <tr key={ped.id} className="hover:bg-slate-800/40">
-                            <td className="p-3 font-semibold text-slate-100">{ped.produtos?.nome || 'Item Desconhecido'}</td>
-                            <td className="p-3 text-center font-bold text-blue-400">{ped.quantidade} un</td>
-                            <td className="p-3 text-center text-slate-300">{new Date(ped.data_pedido + 'T00:00:00').toLocaleDateString('pt-BR')}</td>
-                            <td className="p-3 text-center">
-                              <span className={`px-2 py-1 rounded text-xs font-semibold border ${corStatus}`}>
-                                {ped.status || 'Em Trânsito'}
-                              </span>
-                            </td>
-                            <td className="p-3 text-center font-bold text-emerald-400">📅 {previsaoTexto}</td>
-                            <td className="p-3 text-center space-x-2 whitespace-nowrap">
-                              <button onClick={() => concluirPedido(ped.id)} className="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-600 text-white rounded text-xs font-semibold cursor-pointer">
-                                ✔️ Recebido
-                              </button>
-                              <button onClick={() => cancelarPedido(ped.id)} className="px-2.5 py-1 bg-rose-900/60 hover:bg-rose-800 text-rose-300 border border-rose-700/50 rounded text-xs font-semibold cursor-pointer">
-                                ❌ Cancelar
-                              </button>
-                            </td>
-                          </tr>
+                          <React.Fragment key={pedido.id}>
+                            <tr className="hover:bg-slate-800/40 transition-colors">
+                              <td className="p-3 text-center">
+                                {temParciais && (
+                                  <button
+                                    onClick={() => toggleExpandirPedido(pedido.id)}
+                                    className="text-slate-400 hover:text-white font-mono text-xs p-1 cursor-pointer"
+                                    title="Expandir entregas parciais"
+                                  >
+                                    {isExpandido ? '▼' : '▶'}
+                                  </button>
+                                )}
+                              </td>
+                              <td className="p-3 font-semibold text-slate-100">
+                                {nomeProd || 'Produto Desconhecido'}
+                              </td>
+                              <td className="p-3 text-center font-bold text-white whitespace-nowrap">
+                                <span className="text-blue-400">{qtdTotal} un</span>
+                                <span className="text-[10px] text-slate-400 font-normal block">
+                                  (Recebido: {qtdRecebida})
+                                </span>
+                              </td>
+                              <td className="p-3 text-sm text-slate-300">{formatarData(pedido.data_pedido)}</td>
+                              <td className="p-3">
+                                <span className={`px-2.5 py-1 rounded border text-xs font-semibold ${badgeStatus}`}>
+                                  {pedido.status}
+                                </span>
+                              </td>
+                              <td className="p-3 text-sm text-slate-300">{pedido.previsao_entrega || '—'}</td>
+                              <td className="p-3 text-center space-x-1.5 whitespace-nowrap">
+                                <button
+                                  onClick={() => {
+                                    setPedidoSelecionadoRecebimento(pedido);
+                                    setQuantidadeParcialReceber(String(qtdTotal - qtdRecebida));
+                                    setModalRecebimentoAberto(true);
+                                  }}
+                                  className="px-2.5 py-1 bg-blue-950/60 hover:bg-blue-900 text-blue-400 border border-blue-800/50 rounded text-xs font-semibold cursor-pointer"
+                                >
+                                  + Parcial
+                                </button>
+                                <button
+                                  onClick={() => handleReceberTotalDireto(pedido)}
+                                  className="px-2.5 py-1 bg-emerald-950/60 hover:bg-emerald-900 text-emerald-400 border border-emerald-800/50 rounded text-xs font-semibold cursor-pointer"
+                                >
+                                  ✓ Recebido
+                                </button>
+                                <button
+                                  onClick={() => handleCancelarPedido(pedido.id)}
+                                  className="px-2.5 py-1 bg-rose-950/40 hover:bg-rose-900 text-rose-400 border border-rose-800/50 rounded text-xs font-semibold cursor-pointer"
+                                >
+                                  Cancelar
+                                </button>
+                              </td>
+                            </tr>
+
+                            {/* Gaveta Expandida com o Histórico de Entregas Parciais */}
+                            {isExpandido && temParciais && (
+                              <tr className="bg-slate-950/70">
+                                <td colSpan={7} className="p-3 pl-12">
+                                  <div className="bg-slate-900/80 border border-slate-800 rounded p-3 space-y-2">
+                                    <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">
+                                      Lotes / Entregas Parciais Registadas:
+                                    </span>
+                                    <div className="space-y-1">
+                                      {pedido.entregas_parciais!.map((entrega) => (
+                                        <div key={entrega.id} className="flex justify-between items-center text-xs text-slate-300 bg-slate-950/50 p-2 rounded border border-slate-800/50">
+                                          <div>
+                                            <span className="font-semibold text-emerald-400">+{entrega.quantidade_entregue} unidades</span>
+                                            <span className="text-slate-400 ml-3">Data: {formatarData(entrega.data_recebimento)}</span>
+                                          </div>
+                                          <span className="text-slate-400 text-[11px]">{entrega.observacao || '—'}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
                         );
                       })
                     )}
@@ -780,6 +876,191 @@ export default function ProdutosAdminPage() {
         </div>
 
       </div>
+
+      {/* MODAL DE HISTÓRICO DE PEDIDOS (CONCLUÍDOS / CANCELADOS) */}
+      {modalHistoricoAberto && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl w-full max-w-4xl space-y-4 shadow-2xl max-h-[85vh] flex flex-col">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-lg font-bold text-white">📜 Histórico de Pedidos (Concluídos e Cancelados)</h3>
+                <p className="text-xs text-slate-400">Consulta de encomendas arquivadas e respetivos lotes entregues</p>
+              </div>
+              <button
+                onClick={() => setModalHistoricoAberto(false)}
+                className="text-slate-400 hover:text-white text-sm font-bold px-3 py-1 bg-slate-800 rounded-lg cursor-pointer"
+              >
+                ✕ Fechar
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 space-y-3">
+              {pedidosHistorico.length === 0 ? (
+                <div className="text-center p-8 text-slate-500 text-sm">Nenhum pedido no histórico até ao momento.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-800 bg-slate-950/50 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                        <th className="p-3 w-10"></th>
+                        <th className="p-3">Item Encomendado</th>
+                        <th className="p-3 text-center">Qtd Total / Recebida</th>
+                        <th className="p-3">Data Pedido</th>
+                        <th className="p-3">Situação</th>
+                        <th className="p-3">Previsão</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 text-sm">
+                      {pedidosHistorico.map((pedido) => {
+                        const isExpandido = !!historicoExpandidos[pedido.id];
+                        const temParciais = pedido.entregas_parciais && pedido.entregas_parciais.length > 0;
+                        const qtdTotal = pedido.quantidade_total;
+                        const qtdRecebida = pedido.quantidade_recebida || 0;
+
+                        const nomeProd = Array.isArray(pedido.produtos)
+                          ? pedido.produtos[0]?.nome
+                          : pedido.produtos?.nome;
+
+                        const badgeStatus =
+                          pedido.status === 'Recebido'
+                            ? 'bg-emerald-950/60 border-emerald-800 text-emerald-400'
+                            : 'bg-rose-950/60 border-rose-800 text-rose-400';
+
+                        return (
+                          <React.Fragment key={pedido.id}>
+                            <tr className="hover:bg-slate-800/40 transition-colors">
+                              <td className="p-3 text-center">
+                                {temParciais && (
+                                  <button
+                                    onClick={() => toggleExpandirHistorico(pedido.id)}
+                                    className="text-slate-400 hover:text-white font-mono text-xs p-1 cursor-pointer"
+                                  >
+                                    {isExpandido ? '▼' : '▶'}
+                                  </button>
+                                )}
+                              </td>
+                              <td className="p-3 font-semibold text-slate-100">{nomeProd || 'Produto'}</td>
+                              <td className="p-3 text-center font-bold text-white whitespace-nowrap">
+                                <span className="text-blue-400">{qtdTotal} un</span>
+                                <span className="text-[10px] text-slate-400 font-normal block">(Recebido: {qtdRecebida})</span>
+                              </td>
+                              <td className="p-3 text-sm text-slate-300">{formatarData(pedido.data_pedido)}</td>
+                              <td className="p-3">
+                                <span className={`px-2.5 py-1 rounded border text-xs font-semibold ${badgeStatus}`}>
+                                  {pedido.status}
+                                </span>
+                              </td>
+                              <td className="p-3 text-sm text-slate-300">{pedido.previsao_entrega || '—'}</td>
+                            </tr>
+
+                            {isExpandido && temParciais && (
+                              <tr className="bg-slate-950/70">
+                                <td colSpan={6} className="p-3 pl-12">
+                                  <div className="bg-slate-900/80 border border-slate-800 rounded p-3 space-y-2">
+                                    <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">
+                                      Lotes / Entregas Parciais Registadas:
+                                    </span>
+                                    <div className="space-y-1">
+                                      {pedido.entregas_parciais!.map((entrega) => (
+                                        <div key={entrega.id} className="flex justify-between items-center text-xs text-slate-300 bg-slate-950/50 p-2 rounded border border-slate-800/50">
+                                          <div>
+                                            <span className="font-semibold text-emerald-400">+{entrega.quantidade_entregue} unidades</span>
+                                            <span className="text-slate-400 ml-3">Data: {formatarData(entrega.data_recebimento)}</span>
+                                          </div>
+                                          <span className="text-slate-400 text-[11px]">{entrega.observacao || '—'}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setModalHistoricoAberto(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm font-medium cursor-pointer"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE RECEBIMENTO PARCIAL */}
+      {modalRecebimentoAberto && pedidoSelecionadoRecebimento && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl w-full max-w-md space-y-4 shadow-2xl">
+            <h3 className="text-lg font-bold text-white">Registar Recebimento Parcial</h3>
+            <p className="text-xs text-slate-400">
+              Pendente: <span className="text-emerald-400 font-bold">{pedidoSelecionadoRecebimento.quantidade_total - (pedidoSelecionadoRecebimento.quantidade_recebida || 0)} unidades</span>
+            </p>
+
+            <form onSubmit={handleConfirmarRecebimentoParcial} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Quantidade a Receber Agora</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={quantidadeParcialReceber}
+                  onChange={(e) => setQuantidadeParcialReceber(e.target.value)}
+                  className="w-full p-3 border border-slate-700 rounded-lg bg-slate-950 text-emerald-400 font-bold text-base outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Data do Recebimento</label>
+                <input
+                  type="date"
+                  value={dataRecebimentoParcial}
+                  onChange={(e) => setDataRecebimentoParcial(e.target.value)}
+                  className="w-full p-3 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Observação do Lote</label>
+                <input
+                  type="text"
+                  value={obsRecebimentoParcial}
+                  onChange={(e) => setObsRecebimentoParcial(e.target.value)}
+                  placeholder="Ex: Entrega parcial via transportadora..."
+                  className="w-full p-3 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setModalRecebimentoAberto(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm font-medium cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold cursor-pointer shadow-sm"
+                >
+                  Confirmar Recebimento
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
