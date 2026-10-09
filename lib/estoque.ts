@@ -1,36 +1,68 @@
-import { createClient } from '@/utils/supabase/client';
+import { supabase } from '@/lib/supabase';
 
 export type TipoMovimentacao = 'ENTRADA' | 'SAIDA' | 'AJUSTE' | 'VENDA';
 
-interface MovimentarEstoqueParams {
+interface RegistarMovimentacaoParams {
   produtoId: string;
   tipo: TipoMovimentacao;
   quantidade: number;
   observacao?: string;
 }
 
-/**
- * Executa uma movimentação de estoque atômica no banco de dados (com trava de linha e validação).
- */
-export async function movimentarEstoque({
+export async function registarMovimentacaoEstoque({
   produtoId,
   tipo,
   quantidade,
-  observacao = '',
-}: MovimentarEstoqueParams) {
-  const supabase = createClient();
+  observacao,
+}: RegistarMovimentacaoParams) {
+  try {
+    // 1. Inserir o registo na tabela de movimentações
+    const { error: erroMov } = await supabase.from('movimentacoes_estoque').insert([
+      {
+        produto_id: produtoId,
+        tipo,
+        quantidade,
+        observacao: observacao || null,
+      },
+    ]);
 
-  const { error } = await supabase.rpc('movimentar_estoque', {
-    p_produto_id: produtoId,
-    p_tipo: tipo,
-    p_quantidade: quantidade,
-    p_observacao: observacao,
-  });
+    if (erroMov) throw erroMov;
 
-  if (error) {
-    console.error('Erro ao movimentar estoque:', error.message);
-    throw new Error(error.message);
+    // 2. Buscar o estoque atual do produto
+    const { data: produto, error: erroProdBusca } = await supabase
+      .from('produtos')
+      .select('estoque_atual')
+      .eq('id', produtoId)
+      .single();
+
+    if (erroProdBusca) throw erroProdBusca;
+
+    const estoqueAtual = produto?.estoque_atual ?? 0;
+    let novoEstoque = estoqueAtual;
+
+    if (tipo === 'ENTRADA') {
+      novoEstoque = estoqueAtual + quantidade;
+    } else if (tipo === 'SAIDA' || tipo === 'VENDA') {
+      novoEstoque = Math.max(0, estoqueAtual - quantidade);
+    } else if (tipo === 'AJUSTE') {
+      novoEstoque = quantidade;
+    }
+
+    // 3. Atualizar o estoque na tabela de produtos
+    const { error: erroProdUpdate } = await supabase
+      .from('produtos')
+      .update({ estoque_atual: novoEstoque })
+      .eq('id', produtoId);
+
+    if (erroProdUpdate) throw erroProdUpdate;
+
+    return { success: true, novoEstoque };
+  } catch (err: unknown) {
+    const errorObj = err as { message?: string };
+    console.error('Erro ao registar movimentação de estoque:', errorObj?.message);
+    throw err;
   }
-
-  return { success: true };
 }
+
+// Alias para compatibilidade com a página de lançamento de vendas
+export const movimentarEstoque = registarMovimentacaoEstoque;
