@@ -3,23 +3,8 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
-
-interface Produto {
-  id: string;
-  nome: string;
-  estoque_atual: number;
-}
-
-interface Movimentacao {
-  id: string;
-  produto_id?: string;
-  tipo: 'ENTRADA' | 'SAIDA' | 'AJUSTE' | 'VENDA';
-  quantidade: number;
-  observacao?: string;
-  created_at?: string;
-  produtos?: Produto | Produto[] | null;
-  produto_nome?: string;
-}
+import { Movimentacao, Produto } from '@/lib/types';
+import { formatarData } from '@/lib/formatters';
 
 export default function MovimentacoesEstoquePage() {
   const [movimentacoes, setMovimentacoes] = useState<Movimentacao[]>([]);
@@ -39,7 +24,6 @@ export default function MovimentacoesEstoquePage() {
         setCarregando(true);
         setErro(null);
 
-        // Consulta unificada na tabela 'movimentacoes_estoque'
         const { data, error } = await supabase
           .from('movimentacoes_estoque')
           .select(`
@@ -119,7 +103,6 @@ export default function MovimentacoesEstoquePage() {
         }
       }
 
-      // Excluir da tabela 'movimentacoes_estoque'
       const { error: deleteErr } = await supabase
         .from('movimentacoes_estoque')
         .delete()
@@ -145,8 +128,7 @@ export default function MovimentacoesEstoquePage() {
 
     if (mov.created_at) {
       dataIso = mov.created_at.split('T')[0];
-      const [ano, mes, dia] = dataIso.split('-');
-      dataStr = `${dia}/${mes}/${ano}`;
+      dataStr = formatarData(mov.created_at);
     }
 
     return { dataIso, dataStr, obsLimpa };

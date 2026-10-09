@@ -4,25 +4,8 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { movimentarEstoque } from '@/lib/estoque';
-
-interface Produto {
-  id: string;
-  nome: string;
-  categoria?: string | null;
-  tipo?: string | null;
-  classificacao?: string | null;
-  ativo?: boolean | null;
-  preco_venda: number;
-  estoque_atual: number;
-}
-
-interface ItemVenda {
-  produto_id: string;
-  nome: string;
-  quantidade: number;
-  preco_unitario: number;
-  subtotal: number;
-}
+import { Produto, ItemVenda } from '@/lib/types';
+import { FORMAS_PAGAMENTO } from '@/lib/constants';
 
 export default function NovaVendaPage() {
   const router = useRouter();
@@ -485,7 +468,6 @@ export default function NovaVendaPage() {
         ]);
         if (itemError) throw itemError;
 
-        // Chamada segura e atômica via Supabase RPC (movimentar_estoque)
         await movimentarEstoque({
           produtoId: item.produto_id,
           tipo: 'VENDA',
@@ -730,11 +712,9 @@ export default function NovaVendaPage() {
                   onChange={(e) => setFormaPagamento(e.target.value)}
                   className="w-full p-3 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="PIX">PIX</option>
-                  <option value="BOLETO">Boleto</option>
-                  <option value="DINHEIRO">Dinheiro</option>
-                  <option value="CARTAO">Cartão</option>
-                  <option value="OUTROS">Outros</option>
+                  {FORMAS_PAGAMENTO.map((fp) => (
+                    <option key={fp} value={fp}>{fp}</option>
+                  ))}
                 </select>
               </div>
 
