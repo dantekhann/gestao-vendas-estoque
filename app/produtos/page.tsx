@@ -67,7 +67,7 @@ export default function ProdutosAdminPage() {
   const [, setErro] = useState<string | null>(null);
   
   const [filtroBusca, setFiltroBusca] = useState<string>('');
-  const [filtroStatus] = useState<string>('ativos');
+  const [filtroStatus, setFiltroStatus] = useState<string>('ativos');
   const [filtroClassificacao, setFiltroClassificacao] = useState<string>('todas');
   const [filtroAlertaEstoque] = useState<boolean>(false);
   
@@ -264,7 +264,6 @@ export default function ProdutosAdminPage() {
     }
 
     try {
-      // 1. Registo normal via RPC do Supabase
       const { error } = await supabase.rpc('registrar_recebimento_parcial', {
         p_pedido_id: pedidoSelecionadoRecebimento.id,
         p_quantidade: qtdNum,
@@ -274,7 +273,6 @@ export default function ProdutosAdminPage() {
 
       if (error) throw error;
 
-      // 2. Inteligência de Velcro: deteta se o produto recebido é Velcro e atualiza o item parceiro correspondente
       const prodPedido = Array.isArray(pedidoSelecionadoRecebimento.produtos)
         ? pedidoSelecionadoRecebimento.produtos[0]
         : pedidoSelecionadoRecebimento.produtos;
@@ -284,7 +282,6 @@ export default function ProdutosAdminPage() {
         const ePacote = nomeLower.includes('pacote');
         const unidadeOrigem = ePacote ? 'pacotes' : 'pares';
 
-        // Encontrar o produto parceiro na lista carregada (o outro tipo de velcro)
         const termoBuscaParceiro = ePacote ? 'par' : 'pacote';
         const produtoParceiro = produtos.find(p => 
           p.id !== prodPedido.id && 
@@ -333,7 +330,6 @@ export default function ProdutosAdminPage() {
 
       if (error) throw error;
 
-      // Sincronização inteligente de Velcro se aplicável
       const prodPedido = Array.isArray(pedido.produtos) ? pedido.produtos[0] : pedido.produtos;
       if (prodPedido && prodPedido.nome.toLowerCase().includes('velcro')) {
         const ePacote = prodPedido.nome.toLowerCase().includes('pacote');
@@ -375,6 +371,21 @@ export default function ProdutosAdminPage() {
     } catch (err: unknown) {
       const errorObj = err as { message?: string };
       alert(`Erro ao cancelar pedido: ${errorObj.message}`);
+    }
+  };
+
+  const alternarAtivo = async (id: string, ativoAtual?: boolean) => {
+    const novoStatus = !(ativoAtual !== false);
+    try {
+      const { error } = await supabase
+        .from('produtos')
+        .update({ ativo: novoStatus })
+        .eq('id', id);
+      if (error) throw error;
+      await carregarDados();
+    } catch (err: unknown) {
+      const errorObj = err as { message?: string };
+      alert(`Erro ao atualizar estado do produto: ${errorObj.message}`);
     }
   };
 
@@ -465,6 +476,7 @@ export default function ProdutosAdminPage() {
     let passaStatus = true;
     if (filtroStatus === 'ativos') passaStatus = isAtivo;
     if (filtroStatus === 'inativos') passaStatus = !isAtivo;
+    if (filtroStatus === 'todos') passaStatus = true;
 
     let passaClassificacao = true;
     if (filtroClassificacao !== 'todas') {
@@ -825,6 +837,11 @@ export default function ProdutosAdminPage() {
               Catálogo Atual ({produtosFiltrados.length} / {produtos.length} itens)
             </h2>
             <div className="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
+              <select value={filtroStatus} onChange={(e) => setFiltroStatus(e.target.value)} className="p-2 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none">
+                <option value="ativos">Apenas Ativos</option>
+                <option value="inativos">Apenas Ocultos</option>
+                <option value="todos">Todos (Ativos e Ocultos)</option>
+              </select>
               <select value={filtroClassificacao} onChange={(e) => setFiltroClassificacao(e.target.value)} className="p-2 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none">
                 <option value="todas">Todas as Classificações</option>
                 {OPCOES_CLASSIFICACAO.map((opt) => (<option key={opt} value={opt}>{opt}</option>))}
@@ -850,6 +867,7 @@ export default function ProdutosAdminPage() {
                 <tbody className="divide-y divide-slate-800/60">
                   {produtosFiltrados.map((prod) => {
                     const estaEditando = editandoId === prod.id;
+                    const estaInativo = prod.ativo === false;
                     const atual = prod.estoque_atual ?? 0;
                     const minimo = prod.estoque_minimo ?? 0;
                     const pMin = prod.prazo_entrega_min ?? 0;
@@ -857,9 +875,14 @@ export default function ProdutosAdminPage() {
                     const prazoTexto = pMin === pMax ? `${pMin} dias úteis` : `${pMin} a ${pMax} dias úteis`;
 
                     return (
-                      <tr key={prod.id} className="hover:bg-slate-800/40 transition-colors">
+                      <tr key={prod.id} className={`hover:bg-slate-800/40 transition-colors ${estaInativo ? 'opacity-50 bg-slate-950/40' : ''}`}>
                         <td className="p-3.5 font-semibold text-slate-100">
-                          {estaEditando ? <input type="text" value={editNome} onChange={(e) => setEditNome(e.target.value)} className="w-full p-1.5 border border-blue-500 rounded bg-slate-950 text-white text-sm outline-none" /> : prod.nome}
+                          {estaEditando ? <input type="text" value={editNome} onChange={(e) => setEditNome(e.target.value)} className="w-full p-1.5 border border-blue-500 rounded bg-slate-950 text-white text-sm outline-none" /> : (
+                            <div className="flex items-center gap-2">
+                              <span>{prod.nome}</span>
+                              {estaInativo && <span className="px-1.5 py-0.5 bg-rose-950 text-rose-400 border border-rose-800 text-[10px] rounded">Oculto</span>}
+                            </div>
+                          )}
                         </td>
                         <td className="p-3.5">
                           {estaEditando ? (
@@ -892,7 +915,7 @@ export default function ProdutosAdminPage() {
                             prazoTexto
                           )}
                         </td>
-                        <td className="p-3.5 text-center whitespace-nowrap space-x-2">
+                        <td className="p-3.5 text-center whitespace-nowrap space-x-1.5">
                           {estaEditando ? (
                             <>
                               <button onClick={() => salvarEdicao(prod.id)} className="px-2 py-1 bg-emerald-700 text-white rounded text-xs cursor-pointer">Salvar</button>
@@ -901,6 +924,9 @@ export default function ProdutosAdminPage() {
                           ) : (
                             <>
                               <button onClick={() => iniciarEdicao(prod)} className="px-2.5 py-1 bg-blue-950/60 text-blue-400 border border-blue-800/50 rounded text-xs font-semibold cursor-pointer">Editar</button>
+                              <button onClick={() => alternarAtivo(prod.id, prod.ativo)} className="px-2.5 py-1 bg-amber-950/60 hover:bg-amber-900 text-amber-400 border border-amber-800/50 rounded text-xs font-semibold cursor-pointer">
+                                {prod.ativo !== false ? 'Ocultar' : 'Ativar'}
+                              </button>
                               <button onClick={() => excluirProduto(prod.id, prod.nome)} className="px-2.5 py-1 bg-rose-950/60 text-rose-400 border border-rose-800/50 rounded text-xs font-semibold cursor-pointer">Excluir</button>
                             </>
                           )}

@@ -81,7 +81,13 @@ export default function MovimentacoesPage() {
             <h1 className="text-2xl font-bold text-white">Histórico de Movimentações de Stock</h1>
             <p className="text-sm text-slate-400">Registo de entradas, saídas, vendas e ajustes - OrC Brasil</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/movimentar"
+              className="px-4 py-2 text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-500 rounded-lg transition-colors shadow-sm"
+            >
+              + Novo Lançamento
+            </Link>
             <Link
               href="/produtos"
               className="px-4 py-2 text-sm font-medium bg-slate-800 text-slate-200 hover:bg-slate-700 rounded-lg transition-colors border border-slate-700"
