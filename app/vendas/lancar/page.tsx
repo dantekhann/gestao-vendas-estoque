@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { movimentarEstoque } from '@/lib/estoque';
 
 interface Produto {
   id: string;
@@ -453,6 +454,7 @@ export default function NovaVendaPage() {
         ? `${resumoProdutos} | Obs: ${observacoes.trim()}` 
         : resumoProdutos;
 
+      // 1. Inserir a venda principal
       const { data: vendaData, error: vendaError } = await supabase
         .from('vendas')
         .insert([
@@ -470,6 +472,7 @@ export default function NovaVendaPage() {
       if (vendaError) throw vendaError;
       const vendaId = vendaData.id;
 
+      // 2. Inserir os itens e chamar a função atômica de movimentação de estoque
       for (const item of itens) {
         const { error: itemError } = await supabase.from('itens_venda').insert([
           {
@@ -482,30 +485,13 @@ export default function NovaVendaPage() {
         ]);
         if (itemError) throw itemError;
 
-        const produtoOriginal = produtos.find((p) => p.id === item.produto_id);
-        const estoqueAtual = produtoOriginal ? produtoOriginal.estoque_atual : 0;
-        const novoEstoque = Math.max(0, estoqueAtual - item.quantidade);
-
-        const { error: prodError } = await supabase
-          .from('produtos')
-          .update({ estoque_atual: novoEstoque })
-          .eq('id', item.produto_id);
-
-        if (prodError) throw prodError;
-
-        const { error: movError } = await supabase.from('movimentacoes').insert([
-          {
-            produto_id: item.produto_id,
-            tipo: 'VENDA',
-            quantidade: item.quantidade,
-            observacao: cliente,
-            created_at: `${dataVenda}T12:00:00.000Z`,
-          },
-        ]);
-        
-        if (movError) {
-          throw new Error(`Erro ao registar movimentação para o produto ${item.nome}: ${movError.message}`);
-        }
+        // Chamada segura e atômica via Supabase RPC (movimentar_estoque)
+        await movimentarEstoque({
+          produtoId: item.produto_id,
+          tipo: 'VENDA',
+          quantidade: item.quantidade,
+          observacao: `Cliente: ${cliente} (Venda #${vendaId.slice(0, 8)})`,
+        });
       }
 
       alert('Venda registada e lançada com sucesso!');
@@ -522,7 +508,7 @@ export default function NovaVendaPage() {
         JSON.stringify(errObj, null, 2);
         
       setErro(mensagemDetalhada);
-      alert("Erro do Supabase: " + mensagemDetalhada);
+      alert("Erro: " + mensagemDetalhada);
     } finally {
       setSalvando(false);
     }

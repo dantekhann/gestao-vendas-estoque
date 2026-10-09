@@ -19,7 +19,6 @@ interface Movimentacao {
   created_at?: string;
   produtos?: Produto | Produto[] | null;
   produto_nome?: string;
-  tabelaOrigem: 'movimentacoes' | 'movimentacoes_estoque';
 }
 
 export default function MovimentacoesEstoquePage() {
@@ -40,25 +39,8 @@ export default function MovimentacoesEstoquePage() {
         setCarregando(true);
         setErro(null);
 
-        // Consulta 1: Vendas na tabela 'movimentacoes'
-        const promVendas = supabase
-          .from('movimentacoes')
-          .select(`
-            id,
-            produto_id,
-            tipo,
-            quantidade,
-            observacao,
-            created_at,
-            produtos (
-              id,
-              nome,
-              estoque_atual
-            )
-          `);
-
-        // Consulta 2: Entradas, Saídas e Ajustes na tabela 'movimentacoes_estoque'
-        const promOutras = supabase
+        // Consulta unificada na tabela 'movimentacoes_estoque'
+        const { data, error } = await supabase
           .from('movimentacoes_estoque')
           .select(`
             id,
@@ -72,58 +54,12 @@ export default function MovimentacoesEstoquePage() {
               nome,
               estoque_atual
             )
-          `);
+          `)
+          .order('created_at', { ascending: false });
 
-        const [resVendas, resOutras] = await Promise.all([promVendas, promOutras]);
+        if (error) throw error;
 
-        if (resVendas.error) throw resVendas.error;
-        if (resOutras.error) throw resOutras.error;
-
-        // Mapear identificando a tabela de origem para facilitar a exclusão
-        const listaVendas: Movimentacao[] = (resVendas.data || []).map((item) => ({
-          ...item,
-          tabelaOrigem: 'movimentacoes',
-        }));
-
-        const listaOutras: Movimentacao[] = (resOutras.data || []).map((item) => ({
-          ...item,
-          tabelaOrigem: 'movimentacoes_estoque',
-        }));
-
-        // Unir as duas listas
-        const combinadas = [...listaVendas, ...listaOutras];
-
-        // Função robusta para extrair o timestamp real de qualquer registo (Venda ou Estoque)
-        const obterTimestamp = (m: Movimentacao) => {
-          if (m.observacao) {
-            const match = m.observacao.match(/\[Data:\s*([\d-]+)\]/);
-            if (match && match[1]) {
-              const t = new Date(match[1] + 'T00:00:00').getTime();
-              if (!isNaN(t)) return t;
-            }
-          }
-
-          if (m.created_at) {
-            const t = new Date(m.created_at).getTime();
-            if (!isNaN(t) && t > 0) return t;
-          }
-
-          return 0;
-        };
-
-        // Ordenação rigorosa unificada (da mais recente para a mais antiga)
-        combinadas.sort((a, b) => {
-          const timeA = obterTimestamp(a);
-          const timeB = obterTimestamp(b);
-
-          if (timeB !== timeA) {
-            return timeB - timeA;
-          }
-
-          return String(b.id).localeCompare(String(a.id));
-        });
-
-        setMovimentacoes(combinadas);
+        setMovimentacoes(data || []);
       } catch (err: unknown) {
         const errorObj = err as { message?: string };
         setErro(errorObj?.message || 'Erro ao carregar movimentações de estoque.');
@@ -183,9 +119,9 @@ export default function MovimentacoesEstoquePage() {
         }
       }
 
-      // Excluir da tabela correta onde o registo estava guardado
+      // Excluir da tabela 'movimentacoes_estoque'
       const { error: deleteErr } = await supabase
-        .from(mov.tabelaOrigem)
+        .from('movimentacoes_estoque')
         .delete()
         .eq('id', mov.id);
 
@@ -205,7 +141,7 @@ export default function MovimentacoesEstoquePage() {
   const formatarLinhaMovimentacao = (mov: Movimentacao) => {
     let dataIso = '';
     let dataStr = '—';
-    let obsLimpa = mov.observacao || '—';
+    const obsLimpa = mov.observacao || '—';
 
     if (mov.created_at) {
       dataIso = mov.created_at.split('T')[0];
@@ -213,19 +149,7 @@ export default function MovimentacoesEstoquePage() {
       dataStr = `${dia}/${mes}/${ano}`;
     }
 
-    if (mov.observacao) {
-      const match = mov.observacao.match(/\[Data:\s*([\d-]+)\]/);
-      if (match) {
-        if (!mov.created_at) {
-          dataIso = match[1];
-          const [ano, mes, dia] = dataIso.split('-');
-          dataStr = `${dia}/${mes}/${ano}`;
-        }
-        obsLimpa = mov.observacao.replace(/\[Data:\s*[\d-]+\]/, '').trim();
-      }
-    }
-
-    return { dataIso, dataStr, obsLimpa: obsLimpa || '—' };
+    return { dataIso, dataStr, obsLimpa };
   };
 
   const movimentacoesFiltradas = movimentacoes.filter((mov) => {
@@ -333,7 +257,7 @@ export default function MovimentacoesEstoquePage() {
                     setFiltroDataInicio('');
                     setFiltroDataFim('');
                   }}
-                  className="text-xs text-blue-400 hover:text-blue-300 underline font-medium"
+                  className="text-xs text-blue-400 hover:text-blue-300 underline font-medium cursor-pointer"
                 >
                   Limpar Filtros
                 </button>
@@ -385,7 +309,7 @@ export default function MovimentacoesEstoquePage() {
                           : 'bg-amber-950/60 border-amber-800/60 text-amber-400';
 
                       return (
-                        <tr key={`${mov.tabelaOrigem}-${mov.id}`} className="hover:bg-slate-800/40 transition-colors">
+                        <tr key={mov.id} className="hover:bg-slate-800/40 transition-colors">
                           <td className="p-3.5 text-sm font-medium text-slate-300 whitespace-nowrap">
                             {dataStr}
                           </td>
