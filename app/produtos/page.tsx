@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { z } from 'zod';
 import { supabase } from '@/lib/supabase';
 import { formatarData } from '@/lib/formatters';
-import { processarLancamentoVelcro } from '@/lib/estoque';
+import { processarLancamentoVelcro, ehVelcro, encontrarParceiroVelcro } from '@/lib/estoque';
 
 // Esquema de validação com Zod
 const produtoSchema = z.object({
@@ -253,6 +253,42 @@ export default function ProdutosAdminPage() {
     }
   };
 
+  // A função do banco (registrar_recebimento_parcial) já dá entrada no produto do pedido.
+  // Aqui só sincronizamos o produto parceiro do velcro (pacote <-> pares),
+  // sem movimentar o produto do pedido de novo.
+  // Retorna null se deu tudo certo (ou se não se aplica) e a mensagem de erro se falhou.
+  const sincronizarVelcroAposRecebimento = async (
+    pedido: Pedido,
+    quantidade: number,
+    observacao: string
+  ): Promise<string | null> => {
+    const prodPedido = Array.isArray(pedido.produtos) ? pedido.produtos[0] : pedido.produtos;
+    if (!prodPedido || !ehVelcro(prodPedido.nome)) return null;
+
+    const { parceiro, unidadeOrigem } = encontrarParceiroVelcro(prodPedido, produtos);
+    if (!parceiro) return null;
+
+    try {
+      await processarLancamentoVelcro({
+        produtoIdOrigem: prodPedido.id,
+        produtoIdParceiro: parceiro.id,
+        quantidade,
+        unidadeOrigem,
+        tipo: 'ENTRADA',
+        observacao,
+        registrarOrigem: false,
+      });
+      return null;
+    } catch (err: unknown) {
+      const errorObj = err as { message?: string };
+      return errorObj?.message || 'erro desconhecido';
+    }
+  };
+
+  const avisoFalhaVelcro = (detalhe: string) =>
+    `Recebimento registado, mas o ajuste automático do velcro parceiro falhou (${detalhe}). ` +
+    'NÃO repita o recebimento: corrija o produto parceiro em "Lançar Movimentação".';
+
   const handleConfirmarRecebimentoParcial = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!pedidoSelecionadoRecebimento || !quantidadeParcialReceber) return;
@@ -273,35 +309,17 @@ export default function ProdutosAdminPage() {
 
       if (error) throw error;
 
-      const prodPedido = Array.isArray(pedidoSelecionadoRecebimento.produtos)
-        ? pedidoSelecionadoRecebimento.produtos[0]
-        : pedidoSelecionadoRecebimento.produtos;
+      const erroVelcro = await sincronizarVelcroAposRecebimento(
+        pedidoSelecionadoRecebimento,
+        qtdNum,
+        'Recebimento de pedido de velcro'
+      );
 
-      if (prodPedido && prodPedido.nome.toLowerCase().includes('velcro')) {
-        const nomeLower = prodPedido.nome.toLowerCase();
-        const ePacote = nomeLower.includes('pacote');
-        const unidadeOrigem = ePacote ? 'pacotes' : 'pares';
-
-        const termoBuscaParceiro = ePacote ? 'par' : 'pacote';
-        const produtoParceiro = produtos.find(p => 
-          p.id !== prodPedido.id && 
-          p.nome.toLowerCase().includes('velcro') && 
-          p.nome.toLowerCase().includes(termoBuscaParceiro)
-        );
-
-        if (produtoParceiro) {
-          await processarLancamentoVelcro({
-            produtoIdOrigem: prodPedido.id,
-            produtoIdParceiro: produtoParceiro.id,
-            quantidade: qtdNum,
-            unidadeOrigem,
-            tipo: 'ENTRADA',
-            observacao: `Recebimento de pedido de velcro`
-          });
-        }
+      if (erroVelcro) {
+        alert(avisoFalhaVelcro(erroVelcro));
+      } else {
+        alert('Recebimento parcial registado e stock atualizado com sucesso!');
       }
-
-      alert('Recebimento parcial registado e stock atualizado com sucesso!');
       setModalRecebimentoAberto(false);
       setPedidoSelecionadoRecebimento(null);
       setQuantidadeParcialReceber('');
@@ -330,29 +348,17 @@ export default function ProdutosAdminPage() {
 
       if (error) throw error;
 
-      const prodPedido = Array.isArray(pedido.produtos) ? pedido.produtos[0] : pedido.produtos;
-      if (prodPedido && prodPedido.nome.toLowerCase().includes('velcro')) {
-        const ePacote = prodPedido.nome.toLowerCase().includes('pacote');
-        const unidadeOrigem = ePacote ? 'pacotes' : 'pares';
-        const produtoParceiro = produtos.find(p => 
-          p.id !== prodPedido.id && 
-          p.nome.toLowerCase().includes('velcro') && 
-          p.nome.toLowerCase().includes(ePacote ? 'par' : 'pacote')
-        );
+      const erroVelcro = await sincronizarVelcroAposRecebimento(
+        pedido,
+        saldoPendente,
+        'Recebimento total direto de velcro'
+      );
 
-        if (produtoParceiro) {
-          await processarLancamentoVelcro({
-            produtoIdOrigem: prodPedido.id,
-            produtoIdParceiro: produtoParceiro.id,
-            quantidade: saldoPendente,
-            unidadeOrigem,
-            tipo: 'ENTRADA',
-            observacao: 'Recebimento total direto de velcro'
-          });
-        }
+      if (erroVelcro) {
+        alert(avisoFalhaVelcro(erroVelcro));
+      } else {
+        alert('Pedido marcado como totalmente recebido e stock atualizado!');
       }
-
-      alert('Pedido marcado como totalmente recebido e stock atualizado!');
       await carregarDados();
     } catch (err: unknown) {
       const errorObj = err as { message?: string };

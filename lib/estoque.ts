@@ -20,7 +20,7 @@ export async function registarMovimentacaoEstoque({
   sincronizarVelcro = true,
 }: RegistarMovimentacaoParams) {
   try {
-    // 1. Buscar dados do produto (nome e estoque atual)[cite: 1]
+    // 1. Buscar dados do produto (nome e estoque atual)
     const { data: produto, error: erroProdBusca } = await supabase
       .from('produtos')
       .select('id, nome, estoque_atual')
@@ -29,7 +29,7 @@ export async function registarMovimentacaoEstoque({
 
     if (erroProdBusca) throw erroProdBusca;
 
-    // 2. Inserir o registo na tabela de movimentações[cite: 1]
+    // 2. Inserir o registo na tabela de movimentações
     const { error: erroMov } = await supabase.from('movimentacoes_estoque').insert([
       {
         produto_id: produtoId,
@@ -41,7 +41,7 @@ export async function registarMovimentacaoEstoque({
 
     if (erroMov) throw erroMov;
 
-    // 3. Buscar o estoque atual e calcular o novo valor[cite: 1]
+    // 3. Buscar o estoque atual e calcular o novo valor
     const estoqueAtual = produto?.estoque_atual ?? 0;
     let novoEstoque = estoqueAtual;
 
@@ -53,7 +53,7 @@ export async function registarMovimentacaoEstoque({
       novoEstoque = quantidade;
     }
 
-    // 4. Atualizar o estoque na tabela de produtos[cite: 1]
+    // 4. Atualizar o estoque na tabela de produtos
     const { error: erroProdUpdate } = await supabase
       .from('produtos')
       .update({ estoque_atual: novoEstoque })
@@ -61,7 +61,7 @@ export async function registarMovimentacaoEstoque({
 
     if (erroProdUpdate) throw erroProdUpdate;
 
-    // 5. Sincronização Automática de Velcro (1 pacote = 500 pares)[cite: 1]
+    // 5. Sincronização Automática de Velcro (1 pacote = 500 pares)
     if (sincronizarVelcro && produto?.nome.toLowerCase().includes('velcro')) {
       const nomeLower = produto.nome.toLowerCase();
       const ePacote = nomeLower.includes('pacote');
@@ -99,14 +99,14 @@ export async function registarMovimentacaoEstoque({
   }
 }
 
-// Alias para compatibilidade com a página de lançamento de vendas[cite: 1]
+// Alias para compatibilidade com a página de lançamento de vendas
 export const movimentarEstoque = registarMovimentacaoEstoque;
 
 // ==========================================
 // LÓGICA DE CONVERSÃO E LANÇAMENTO DE VELCRO (MANUAL)
 // ==========================================
 
-type UnidadeVelcro = 'pares' | 'pacotes';
+export type UnidadeVelcro = 'pares' | 'pacotes';
 
 interface ParametrosVelcro {
   produtoIdOrigem: string;
@@ -115,6 +115,37 @@ interface ParametrosVelcro {
   unidadeOrigem: UnidadeVelcro;
   tipo: TipoMovimentacao;
   observacao?: string;
+  /**
+   * Quando false, só o produto parceiro é movimentado. Use false quando o produto de origem
+   * já teve o estoque atualizado por outra rotina (ex.: função do banco que registra
+   * o recebimento de um pedido), para não contar a mesma entrada duas vezes.
+   */
+  registrarOrigem?: boolean;
+}
+
+export function ehVelcro(nome: string): boolean {
+  return nome.toLowerCase().includes('velcro');
+}
+
+/**
+ * Localiza, no catálogo, o produto parceiro do velcro (pacote <-> pares)
+ * e informa a unidade em que o produto informado é controlado.
+ */
+export function encontrarParceiroVelcro<T extends { id: string; nome: string }>(
+  produto: { id: string; nome: string },
+  catalogo: T[]
+): { parceiro: T | undefined; unidadeOrigem: UnidadeVelcro } {
+  const ePacote = produto.nome.toLowerCase().includes('pacote');
+  const termoParceiro = ePacote ? 'par' : 'pacote';
+
+  const parceiro = catalogo.find(
+    (p) =>
+      p.id !== produto.id &&
+      ehVelcro(p.nome) &&
+      p.nome.toLowerCase().includes(termoParceiro)
+  );
+
+  return { parceiro, unidadeOrigem: ePacote ? 'pacotes' : 'pares' };
 }
 
 export async function processarLancamentoVelcro({
@@ -124,6 +155,7 @@ export async function processarLancamentoVelcro({
   unidadeOrigem,
   tipo,
   observacao,
+  registrarOrigem = true,
 }: ParametrosVelcro) {
   try {
     let qtdParceiro = 0;
@@ -135,13 +167,15 @@ export async function processarLancamentoVelcro({
     }
 
     // Movimentação principal usando a função robusta unificada
-    await registarMovimentacaoEstoque({
-      produtoId: produtoIdOrigem,
-      tipo,
-      quantidade,
-      observacao: `${observacao || 'Lançamento de velcro'} (${unidadeOrigem})`,
-      sincronizarVelcro: false,
-    });
+    if (registrarOrigem) {
+      await registarMovimentacaoEstoque({
+        produtoId: produtoIdOrigem,
+        tipo,
+        quantidade,
+        observacao: `${observacao || 'Lançamento de velcro'} (${unidadeOrigem})`,
+        sincronizarVelcro: false,
+      });
+    }
 
     if (produtoIdParceiro) {
       const unidadeDestino = unidadeOrigem === 'pares' ? 'pacotes' : 'pares';
