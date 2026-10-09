@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { z } from 'zod';
 import { supabase } from '@/lib/supabase';
 import { formatarData } from '@/lib/formatters';
+import { processarLancamentoVelcro } from '@/lib/estoque';
 
 // Esquema de validação com Zod
 const produtoSchema = z.object({
@@ -263,6 +264,7 @@ export default function ProdutosAdminPage() {
     }
 
     try {
+      // 1. Registo normal via RPC do Supabase
       const { error } = await supabase.rpc('registrar_recebimento_parcial', {
         p_pedido_id: pedidoSelecionadoRecebimento.id,
         p_quantidade: qtdNum,
@@ -271,6 +273,36 @@ export default function ProdutosAdminPage() {
       });
 
       if (error) throw error;
+
+      // 2. Inteligência de Velcro: deteta se o produto recebido é Velcro e atualiza o item parceiro correspondente
+      const prodPedido = Array.isArray(pedidoSelecionadoRecebimento.produtos)
+        ? pedidoSelecionadoRecebimento.produtos[0]
+        : pedidoSelecionadoRecebimento.produtos;
+
+      if (prodPedido && prodPedido.nome.toLowerCase().includes('velcro')) {
+        const nomeLower = prodPedido.nome.toLowerCase();
+        const ePacote = nomeLower.includes('pacote');
+        const unidadeOrigem = ePacote ? 'pacotes' : 'pares';
+
+        // Encontrar o produto parceiro na lista carregada (o outro tipo de velcro)
+        const termoBuscaParceiro = ePacote ? 'par' : 'pacote';
+        const produtoParceiro = produtos.find(p => 
+          p.id !== prodPedido.id && 
+          p.nome.toLowerCase().includes('velcro') && 
+          p.nome.toLowerCase().includes(termoBuscaParceiro)
+        );
+
+        if (produtoParceiro) {
+          await processarLancamentoVelcro({
+            produtoIdOrigem: prodPedido.id,
+            produtoIdParceiro: produtoParceiro.id,
+            quantidade: qtdNum,
+            unidadeOrigem,
+            tipo: 'ENTRADA',
+            observacao: `Recebimento de pedido de velcro`
+          });
+        }
+      }
 
       alert('Recebimento parcial registado e stock atualizado com sucesso!');
       setModalRecebimentoAberto(false);
@@ -300,6 +332,29 @@ export default function ProdutosAdminPage() {
       });
 
       if (error) throw error;
+
+      // Sincronização inteligente de Velcro se aplicável
+      const prodPedido = Array.isArray(pedido.produtos) ? pedido.produtos[0] : pedido.produtos;
+      if (prodPedido && prodPedido.nome.toLowerCase().includes('velcro')) {
+        const ePacote = prodPedido.nome.toLowerCase().includes('pacote');
+        const unidadeOrigem = ePacote ? 'pacotes' : 'pares';
+        const produtoParceiro = produtos.find(p => 
+          p.id !== prodPedido.id && 
+          p.nome.toLowerCase().includes('velcro') && 
+          p.nome.toLowerCase().includes(ePacote ? 'par' : 'pacote')
+        );
+
+        if (produtoParceiro) {
+          await processarLancamentoVelcro({
+            produtoIdOrigem: prodPedido.id,
+            produtoIdParceiro: produtoParceiro.id,
+            quantidade: saldoPendente,
+            unidadeOrigem,
+            tipo: 'ENTRADA',
+            observacao: 'Recebimento total direto de velcro'
+          });
+        }
+      }
 
       alert('Pedido marcado como totalmente recebido e stock atualizado!');
       await carregarDados();
@@ -400,9 +455,7 @@ export default function ProdutosAdminPage() {
     alert('Lista de reposição copiada para a área de transferência!');
   };
 
-  // Separação: Apenas pedidos ativos (Em Trânsito / Parcialmente Recebido) ficam na tabela principal
   const pedidosAtivos = pedidos.filter(p => p.status !== 'Recebido' && p.status !== 'Cancelado');
-  // Histórico: Pedidos concluídos ou cancelados
   const pedidosHistorico = pedidos.filter(p => p.status === 'Recebido' || p.status === 'Cancelado');
 
   const produtosFiltrados = produtos.filter((p) => {
@@ -527,13 +580,10 @@ export default function ProdutosAdminPage() {
           {secaoTransitoAberta && (
             <div className="space-y-6 pt-3 border-t border-slate-800">
               
-              {/* Formulário com Autocomplete por Digitação */}
               <form onSubmit={handleRegistarPedido} className="bg-slate-950 p-5 rounded-lg border border-slate-800 space-y-4">
                 <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wide">Registar Nova Compra / Encomenda</h3>
                 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  
-                  {/* Caixa de Busca com Autocomplete */}
                   <div className="sm:col-span-2 relative" ref={dropdownRef}>
                     <label className="block text-xs font-medium text-slate-400 mb-1">Pesquisar e Selecionar Insumo / Item</label>
                     <input 
@@ -569,7 +619,6 @@ export default function ProdutosAdminPage() {
                     )}
                   </div>
 
-                  {/* Quantidade */}
                   <div>
                     <label className="block text-xs font-medium text-slate-400 mb-1">Quantidade Encomendada</label>
                     <input 
@@ -580,7 +629,6 @@ export default function ProdutosAdminPage() {
                     />
                   </div>
 
-                  {/* Data da Compra */}
                   <div>
                     <label className="block text-xs font-medium text-slate-400 mb-1">Data do Pedido</label>
                     <input 
@@ -591,7 +639,6 @@ export default function ProdutosAdminPage() {
                     />
                   </div>
 
-                  {/* Previsão */}
                   <div className="sm:col-span-2">
                     <label className="block text-xs font-medium text-slate-400 mb-1">Previsão (Texto ou Datas)</label>
                     <input 
@@ -603,7 +650,6 @@ export default function ProdutosAdminPage() {
                     />
                   </div>
 
-                  {/* Botão de Submissão */}
                   <div className="sm:col-span-2 flex items-end">
                     <button 
                       type="submit" 
@@ -616,7 +662,6 @@ export default function ProdutosAdminPage() {
                 </div>
               </form>
 
-              {/* Tabela de Pedidos Ativos */}
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse">
                   <thead>
@@ -632,7 +677,7 @@ export default function ProdutosAdminPage() {
                   </thead>
                   <tbody className="divide-y divide-slate-800/60 text-sm">
                     {pedidosAtivos.length === 0 ? (
-                      <tr><td colSpan={7} className="text-center p-6 text-slate-500">Nenhum pedido ativo no momento. (Ver histórico para concluídos)</td></tr>
+                      <tr><td colSpan={7} className="text-center p-6 text-slate-500">Nenhum pedido ativo no momento.</td></tr>
                     ) : (
                       pedidosAtivos.map((pedido) => {
                         const isExpandido = !!pedidosExpandidos[pedido.id];
@@ -657,20 +702,15 @@ export default function ProdutosAdminPage() {
                                   <button
                                     onClick={() => toggleExpandirPedido(pedido.id)}
                                     className="text-slate-400 hover:text-white font-mono text-xs p-1 cursor-pointer"
-                                    title="Expandir entregas parciais"
                                   >
                                     {isExpandido ? '▼' : '▶'}
                                   </button>
                                 )}
                               </td>
-                              <td className="p-3 font-semibold text-slate-100">
-                                {nomeProd || 'Produto Desconhecido'}
-                              </td>
+                              <td className="p-3 font-semibold text-slate-100">{nomeProd || 'Produto Desconhecido'}</td>
                               <td className="p-3 text-center font-bold text-white whitespace-nowrap">
                                 <span className="text-blue-400">{qtdTotal} un</span>
-                                <span className="text-[10px] text-slate-400 font-normal block">
-                                  (Recebido: {qtdRecebida})
-                                </span>
+                                <span className="text-[10px] text-slate-400 font-normal block">(Recebido: {qtdRecebida})</span>
                               </td>
                               <td className="p-3 text-sm text-slate-300">{formatarData(pedido.data_pedido)}</td>
                               <td className="p-3">
@@ -705,7 +745,6 @@ export default function ProdutosAdminPage() {
                               </td>
                             </tr>
 
-                            {/* Gaveta Expandida com o Histórico de Entregas Parciais */}
                             {isExpandido && temParciais && (
                               <tr className="bg-slate-950/70">
                                 <td colSpan={7} className="p-3 pl-12">
@@ -877,7 +916,7 @@ export default function ProdutosAdminPage() {
 
       </div>
 
-      {/* MODAL DE HISTÓRICO DE PEDIDOS (CONCLUÍDOS / CANCELADOS) */}
+      {/* MODAL DE HISTÓRICO DE PEDIDOS */}
       {modalHistoricoAberto && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
           <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl w-full max-w-4xl space-y-4 shadow-2xl max-h-[85vh] flex flex-col">
