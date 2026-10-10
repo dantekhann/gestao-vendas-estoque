@@ -446,6 +446,7 @@ export default function NovaVendaPage() {
         p_forma_pagamento: formaPagamento,
         p_valor_total: totalFinal,
         p_observacao: observacaoFinal,
+        p_data_venda: dataVenda || null,
         p_itens: itens.map(i => ({
           produto_id: i.produto_id,
           quantidade: i.quantidade,

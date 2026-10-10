@@ -100,7 +100,7 @@ export default function MovimentarEstoquePage() {
         tipo,
         quantidade: Number(quantidade),
         observacao: obsComData,
-        sincronizarVelcro: true,
+        sincronizarVelcro: false,
       });
 
       router.push('/movimentacoes');
