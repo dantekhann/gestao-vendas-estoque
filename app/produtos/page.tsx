@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { z } from 'zod';
 import { supabase } from '@/lib/supabase';
 import { formatarData } from '@/lib/formatters';
-import { processarLancamentoVelcro, ehVelcro, encontrarParceiroVelcro } from '@/lib/estoque';
 
 // Esquema de validação com Zod
 const produtoSchema = z.object({
@@ -253,42 +252,6 @@ export default function ProdutosAdminPage() {
     }
   };
 
-  // A função do banco (registrar_recebimento_parcial) já dá entrada no produto do pedido.
-  // Aqui só sincronizamos o produto parceiro do velcro (pacote <-> pares),
-  // sem movimentar o produto do pedido de novo.
-  // Retorna null se deu tudo certo (ou se não se aplica) e a mensagem de erro se falhou.
-  const sincronizarVelcroAposRecebimento = async (
-    pedido: Pedido,
-    quantidade: number,
-    observacao: string
-  ): Promise<string | null> => {
-    const prodPedido = Array.isArray(pedido.produtos) ? pedido.produtos[0] : pedido.produtos;
-    if (!prodPedido || !ehVelcro(prodPedido.nome)) return null;
-
-    const { parceiro, unidadeOrigem } = encontrarParceiroVelcro(prodPedido, produtos);
-    if (!parceiro) return null;
-
-    try {
-      await processarLancamentoVelcro({
-        produtoIdOrigem: prodPedido.id,
-        produtoIdParceiro: parceiro.id,
-        quantidade,
-        unidadeOrigem,
-        tipo: 'ENTRADA',
-        observacao,
-        registrarOrigem: false,
-      });
-      return null;
-    } catch (err: unknown) {
-      const errorObj = err as { message?: string };
-      return errorObj?.message || 'erro desconhecido';
-    }
-  };
-
-  const avisoFalhaVelcro = (detalhe: string) =>
-    `Recebimento registado, mas o ajuste automático do velcro parceiro falhou (${detalhe}). ` +
-    'NÃO repita o recebimento: corrija o produto parceiro em "Lançar Movimentação".';
-
   const handleConfirmarRecebimentoParcial = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!pedidoSelecionadoRecebimento || !quantidadeParcialReceber) return;
@@ -309,17 +272,7 @@ export default function ProdutosAdminPage() {
 
       if (error) throw error;
 
-      const erroVelcro = await sincronizarVelcroAposRecebimento(
-        pedidoSelecionadoRecebimento,
-        qtdNum,
-        'Recebimento de pedido de velcro'
-      );
-
-      if (erroVelcro) {
-        alert(avisoFalhaVelcro(erroVelcro));
-      } else {
-        alert('Recebimento parcial registado e stock atualizado com sucesso!');
-      }
+      alert('Recebimento parcial registado e stock atualizado com sucesso!');
       setModalRecebimentoAberto(false);
       setPedidoSelecionadoRecebimento(null);
       setQuantidadeParcialReceber('');
@@ -348,17 +301,7 @@ export default function ProdutosAdminPage() {
 
       if (error) throw error;
 
-      const erroVelcro = await sincronizarVelcroAposRecebimento(
-        pedido,
-        saldoPendente,
-        'Recebimento total direto de velcro'
-      );
-
-      if (erroVelcro) {
-        alert(avisoFalhaVelcro(erroVelcro));
-      } else {
-        alert('Pedido marcado como totalmente recebido e stock atualizado!');
-      }
+      alert('Pedido marcado como totalmente recebido e stock atualizado!');
       await carregarDados();
     } catch (err: unknown) {
       const errorObj = err as { message?: string };
@@ -427,11 +370,33 @@ export default function ProdutosAdminPage() {
     }
 
     try {
-      const { error } = await supabase.from('produtos').update(resultadoValidacao.data).eq('id', id);
-      if (error) throw error;
+      // 1. Atualizar stock com registo obrigatório no histórico (Ponto 5)[cite: 2]
+      const { error: errRpc } = await supabase.rpc('atualizar_produto_com_historico', {
+        p_produto_id: id,
+        p_novo_estoque: resultadoValidacao.data.estoque_atual,
+        p_observacao: 'Atualização inline de estoque e cadastro'
+      });
+
+      if (errRpc) throw errRpc;
+
+      // 2. Atualizar restantes campos cadastrais
+      const { error: errProd } = await supabase
+        .from('produtos')
+        .update({
+          nome: resultadoValidacao.data.nome,
+          classificacao: resultadoValidacao.data.classificacao,
+          preco_venda: resultadoValidacao.data.preco_venda,
+          estoque_minimo: resultadoValidacao.data.estoque_minimo,
+          prazo_entrega_min: resultadoValidacao.data.prazo_entrega_min,
+          prazo_entrega_max: resultadoValidacao.data.prazo_entrega_max,
+        })
+        .eq('id', id);
+
+      if (errProd) throw errProd;
+
       setEditandoId(null);
       await carregarDados();
-      alert('Produto atualizado com sucesso!');
+      alert('Produto atualizado e histórico registado com sucesso!');
     } catch (err: unknown) {
       const errorObj = err as { message?: string };
       alert(`Erro ao atualizar produto: ${errorObj.message}`);
@@ -503,7 +468,6 @@ export default function ProdutosAdminPage() {
     <div className="min-h-screen bg-slate-950 text-slate-100 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-6xl mx-auto space-y-6">
         
-        {/* Cabeçalho */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900 p-5 rounded-xl border border-slate-800 shadow-md">
           <div>
             <h1 className="text-2xl font-bold text-white">Gestão de Produtos e Prazos</h1>
@@ -519,7 +483,6 @@ export default function ProdutosAdminPage() {
           </div>
         </div>
 
-        {/* PAINEL DE REPOSIÇÃO */}
         {totalEmAlerta > 0 && (
           <div className="bg-amber-950/35 border border-amber-600/40 rounded-xl p-5 shadow-lg space-y-4">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
@@ -570,7 +533,6 @@ export default function ProdutosAdminPage() {
           </div>
         )}
 
-        {/* SECÇÃO: LOGÍSTICA & PEDIDOS EM TRÂNSITO */}
         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-4">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
             <div>
@@ -796,7 +758,6 @@ export default function ProdutosAdminPage() {
           )}
         </div>
 
-        {/* Formulário Adicionar Novo Produto */}
         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-4">
           <h2 className="text-lg font-semibold text-slate-200">Adicionar Novo Produto / Insumo</h2>
           <form onSubmit={handleAdicionarProduto} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3 items-end">
@@ -836,7 +797,6 @@ export default function ProdutosAdminPage() {
           </form>
         </div>
 
-        {/* Catálogo Atual e Filtros */}
         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-4">
           <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3">
             <h2 className="text-lg font-semibold text-slate-200">
@@ -948,7 +908,6 @@ export default function ProdutosAdminPage() {
 
       </div>
 
-      {/* MODAL DE HISTÓRICO DE PEDIDOS */}
       {modalHistoricoAberto && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
           <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl w-full max-w-4xl space-y-4 shadow-2xl max-h-[85vh] flex flex-col">
@@ -1068,7 +1027,6 @@ export default function ProdutosAdminPage() {
         </div>
       )}
 
-      {/* MODAL DE RECEBIMENTO PARCIAL */}
       {modalRecebimentoAberto && pedidoSelecionadoRecebimento && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
           <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl w-full max-w-md space-y-4 shadow-2xl">

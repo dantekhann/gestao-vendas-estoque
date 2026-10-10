@@ -15,11 +15,14 @@ interface RegistarMovimentacaoParams {
 export async function registarMovimentacaoEstoque({
   produtoId,
   tipo,
-  quantidade,
+  quantidade: quantidadeRaw,
   observacao,
   sincronizarVelcro = true,
 }: RegistarMovimentacaoParams) {
   try {
+    // Forçar conversão estrita para número para evitar concatenação de strings ou NaN
+    const quantidade = Number(quantidadeRaw) || 0;
+
     // 1. Buscar dados do produto (nome e estoque atual)
     const { data: produto, error: erroProdBusca } = await supabase
       .from('produtos')
@@ -42,7 +45,7 @@ export async function registarMovimentacaoEstoque({
     if (erroMov) throw erroMov;
 
     // 3. Buscar o estoque atual e calcular o novo valor
-    const estoqueAtual = produto?.estoque_atual ?? 0;
+    const estoqueAtual = Number(produto?.estoque_atual) || 0;
     let novoEstoque = estoqueAtual;
 
     if (tipo === 'ENTRADA') {
@@ -61,33 +64,43 @@ export async function registarMovimentacaoEstoque({
 
     if (erroProdUpdate) throw erroProdUpdate;
 
-    // 5. Sincronização Automática de Velcro (1 pacote = 500 pares)
-    if (sincronizarVelcro && produto?.nome.toLowerCase().includes('velcro')) {
+    // 5. Sincronização Automática de Velcro com conversão numérica blindada
+    if (sincronizarVelcro && produto?.nome) {
       const nomeLower = produto.nome.toLowerCase();
-      const ePacote = nomeLower.includes('pacote');
-      const termoBuscaParceiro = ePacote ? 'par' : 'pacote';
+      if (nomeLower.includes('velcro')) {
+        const ePacote = nomeLower.includes('pacote') || nomeLower.includes('pacotes');
 
-      const { data: parceiros } = await supabase
-        .from('produtos')
-        .select('id, nome')
-        .neq('id', produtoId);
+        const { data: parceiros, error: erroParceiro } = await supabase
+          .from('produtos')
+          .select('id, nome')
+          .neq('id', produtoId);
 
-      const produtoParceiro = parceiros?.find(
-        (p) => p.nome.toLowerCase().includes('velcro') && p.nome.toLowerCase().includes(termoBuscaParceiro)
-      );
+        if (!erroParceiro && parceiros) {
+          const produtoParceiro = parceiros.find((p) => {
+            const pNome = p.nome.toLowerCase();
+            if (!pNome.includes('velcro')) return false;
+            
+            if (ePacote) {
+              return pNome.includes('par') || pNome.includes('pares');
+            } else {
+              return pNome.includes('pacote') || pNome.includes('pacotes');
+            }
+          });
 
-      if (produtoParceiro) {
-        const quantidadeConvertida = ePacote
-          ? quantidade * PROPORCAO_VELCRO_PAR_PACOTE
-          : quantidade / PROPORCAO_VELCRO_PAR_PACOTE;
+          if (produtoParceiro) {
+            const quantidadeConvertida = ePacote
+              ? quantidade * PROPORCAO_VELCRO_PAR_PACOTE
+              : quantidade / PROPORCAO_VELCRO_PAR_PACOTE;
 
-        await registarMovimentacaoEstoque({
-          produtoId: produtoParceiro.id,
-          tipo,
-          quantidade: quantidadeConvertida,
-          observacao: `Sincronização automática de Velcro (${ePacote ? 'Pacotes ➔ Pares' : 'Pares ➔ Pacotes'})`,
-          sincronizarVelcro: false, // Previne loop recursivo
-        });
+            await registarMovimentacaoEstoque({
+              produtoId: produtoParceiro.id,
+              tipo,
+              quantidade: quantidadeConvertida,
+              observacao: `Sincronização automática de Velcro (${ePacote ? 'Pacotes ➔ Pares' : 'Pares ➔ Pacotes'})`,
+              sincronizarVelcro: false, // Previne loop infinito
+            });
+          }
+        }
       }
     }
 
@@ -99,7 +112,7 @@ export async function registarMovimentacaoEstoque({
   }
 }
 
-// Alias para compatibilidade com a página de lançamento de vendas
+// Alias para compatibilidade com outras páginas
 export const movimentarEstoque = registarMovimentacaoEstoque;
 
 // ==========================================
@@ -115,11 +128,6 @@ interface ParametrosVelcro {
   unidadeOrigem: UnidadeVelcro;
   tipo: TipoMovimentacao;
   observacao?: string;
-  /**
-   * Quando false, só o produto parceiro é movimentado. Use false quando o produto de origem
-   * já teve o estoque atualizado por outra rotina (ex.: função do banco que registra
-   * o recebimento de um pedido), para não contar a mesma entrada duas vezes.
-   */
   registrarOrigem?: boolean;
 }
 
@@ -127,10 +135,6 @@ export function ehVelcro(nome: string): boolean {
   return nome.toLowerCase().includes('velcro');
 }
 
-/**
- * Localiza, no catálogo, o produto parceiro do velcro (pacote <-> pares)
- * e informa a unidade em que o produto informado é controlado.
- */
 export function encontrarParceiroVelcro<T extends { id: string; nome: string }>(
   produto: { id: string; nome: string },
   catalogo: T[]
@@ -150,7 +154,6 @@ export function encontrarParceiroVelcro<T extends { id: string; nome: string }>(
 
 export async function processarLancamentoVelcro({
   produtoIdOrigem,
-  produtoIdParceiro,
   quantidade,
   unidadeOrigem,
   tipo,
@@ -158,40 +161,29 @@ export async function processarLancamentoVelcro({
   registrarOrigem = true,
 }: ParametrosVelcro) {
   try {
-    let qtdParceiro = 0;
+    const qtdNum = Number(quantidade) || 0;
+    let qtdConvertida = 0;
 
     if (unidadeOrigem === 'pares') {
-      qtdParceiro = quantidade / PROPORCAO_VELCRO_PAR_PACOTE;
+      qtdConvertida = qtdNum / PROPORCAO_VELCRO_PAR_PACOTE;
     } else {
-      qtdParceiro = quantidade * PROPORCAO_VELCRO_PAR_PACOTE;
+      qtdConvertida = qtdNum * PROPORCAO_VELCRO_PAR_PACOTE;
     }
 
-    // Movimentação principal usando a função robusta unificada
     if (registrarOrigem) {
       await registarMovimentacaoEstoque({
         produtoId: produtoIdOrigem,
         tipo,
-        quantidade,
+        quantidade: qtdNum,
         observacao: `${observacao || 'Lançamento de velcro'} (${unidadeOrigem})`,
-        sincronizarVelcro: false,
-      });
-    }
-
-    if (produtoIdParceiro) {
-      const unidadeDestino = unidadeOrigem === 'pares' ? 'pacotes' : 'pares';
-      await registarMovimentacaoEstoque({
-        produtoId: produtoIdParceiro,
-        tipo,
-        quantidade: qtdParceiro,
-        observacao: `Conversão automática (${unidadeOrigem} -> ${unidadeDestino}): ${observacao || ''}`,
-        sincronizarVelcro: false,
+        sincronizarVelcro: true,
       });
     }
 
     return { 
       success: true, 
-      quantidadeOriginal: quantidade, 
-      quantidadeConvertida: qtdParceiro 
+      quantidadeOriginal: qtdNum, 
+      quantidadeConvertida: qtdConvertida 
     };
 
   } catch (err: unknown) {

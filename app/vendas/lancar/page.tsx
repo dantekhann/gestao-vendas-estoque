@@ -1,9 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { movimentarEstoque } from '@/lib/estoque';
 import { Produto, ItemVenda } from '@/lib/types';
 import { FORMAS_PAGAMENTO } from '@/lib/constants';
 
@@ -433,50 +432,30 @@ export default function NovaVendaPage() {
         .map((i) => `${i.quantidade}x ${i.nome}`)
         .join(', ');
       
-      const observacaoFinal = observacoes.trim() !== '' 
+      let observacaoFinal = observacoes.trim() !== '' 
         ? `${resumoProdutos} | Obs: ${observacoes.trim()}` 
         : resumoProdutos;
 
-      // 1. Inserir a venda principal
-      const { data: vendaData, error: vendaError } = await supabase
-        .from('vendas')
-        .insert([
-          {
-            cliente,
-            forma_pagamento: formaPagamento,
-            valor_total: totalFinal,
-            observacao: observacaoFinal,
-            created_at: `${dataVenda}T12:00:00.000Z`,
-          },
-        ])
-        .select()
-        .single();
-
-      if (vendaError) throw vendaError;
-      const vendaId = vendaData.id;
-
-      // 2. Inserir os itens e chamar a função atômica de movimentação de estoque
-      for (const item of itens) {
-        const { error: itemError } = await supabase.from('itens_venda').insert([
-          {
-            venda_id: vendaId,
-            produto_id: item.produto_id,
-            quantidade: item.quantidade,
-            preco_unitario: item.preco_unitario,
-            subtotal: item.subtotal,
-          },
-        ]);
-        if (itemError) throw itemError;
-
-        await movimentarEstoque({
-          produtoId: item.produto_id,
-          tipo: 'VENDA',
-          quantidade: item.quantidade,
-          observacao: `Cliente: ${cliente} (Venda #${vendaId.slice(0, 8)})`,
-        });
+      if (descontoNum > 0) {
+        observacaoFinal += ` | Desconto: R$ ${descontoNum.toFixed(2)}`;
       }
 
-      alert('Venda registada e lançada com sucesso!');
+      // CHAMADA ATÓMICA ÚNICA NO SUPABASE (RPC)
+      const { error: rpcError } = await supabase.rpc('lancar_venda_atomica', {
+        p_cliente: cliente,
+        p_forma_pagamento: formaPagamento,
+        p_valor_total: totalFinal,
+        p_observacao: observacaoFinal,
+        p_itens: itens.map(i => ({
+          produto_id: i.produto_id,
+          quantidade: i.quantidade,
+          preco_unitario: i.preco_unitario
+        }))
+      });
+
+      if (rpcError) throw rpcError;
+
+      alert('Venda registada e lançada com sucesso de forma atómica!');
       router.push('/vendas');
       router.refresh();
     } catch (err: unknown) {

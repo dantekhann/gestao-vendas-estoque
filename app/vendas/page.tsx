@@ -3,37 +3,37 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
+import { formatarData } from '@/lib/formatters';
+
+interface ItemVendaDetalhe {
+  id: string;
+  quantidade: number;
+  preco_unitario: number;
+  subtotal: number;
+  produtos?: {
+    nome: string;
+  } | Array<{ nome: string }> | null;
+}
 
 interface Venda {
   id: string;
-  cliente?: string;
-  forma_pagamento?: string;
+  cliente: string;
+  forma_pagamento: string;
   valor_total: number;
   observacao?: string;
-  created_at?: string;
+  created_at: string;
+  itens_venda?: ItemVendaDetalhe[];
 }
 
-export default function HistoricoVendasPage() {
+export default function VendasPage() {
   const [vendas, setVendas] = useState<Venda[]>([]);
   const [carregando, setCarregando] = useState<boolean>(true);
   const [erro, setErro] = useState<string | null>(null);
-
-  // Estados de Filtro
+  
   const [filtroBusca, setFiltroBusca] = useState<string>('');
-  const [filtroCliente, setFiltroCliente] = useState<string>('');
-  const [filtroFormaPgto, setFiltroFormaPgto] = useState<string>('');
-  const [filtroDataInicio, setFiltroDataInicio] = useState<string>('');
-  const [filtroDataFim, setFiltroDataFim] = useState<string>('');
-
-  // Estados do Popup (Modal) de Edição
-  const [modalAberto, setModalAberto] = useState<boolean>(false);
-  const [vendaEditando, setVendaEditando] = useState<Venda | null>(null);
-  const [editCliente, setEditCliente] = useState<string>('');
-  const [editFormaPgto, setEditFormaPgto] = useState<string>('');
-  const [editValorTotal, setEditValorTotal] = useState<number>(0);
-  const [editObservacao, setEditObservacao] = useState<string>('');
-  const [editData, setEditData] = useState<string>('');
-  const [salvando, setSalvando] = useState<boolean>(false);
+  const [filtroPagamento, setFiltroPagamento] = useState<string>('todos');
+  
+  const [vendaSelecionada, setVendaSelecionada] = useState<Venda | null>(null);
 
   const carregarVendas = useCallback(async () => {
     try {
@@ -42,14 +42,23 @@ export default function HistoricoVendasPage() {
 
       const { data, error } = await supabase
         .from('vendas')
-        .select('*')
-        .order('id', { ascending: false });
+        .select(`
+          *,
+          itens_venda (
+            id,
+            quantidade,
+            preco_unitario,
+            subtotal,
+            produtos (nome)
+          )
+        `)
+        .order('created_at', { ascending: false });
 
       if (error) throw error;
       if (data) setVendas(data);
     } catch (err: unknown) {
-      const errorObj = err as { message?: string };
-      setErro(errorObj?.message || 'Erro ao carregar histórico de vendas.');
+      const errObj = err as { message?: string };
+      setErro(errObj?.message || 'Erro ao carregar lista de vendas.');
     } finally {
       setCarregando(false);
     }
@@ -57,237 +66,127 @@ export default function HistoricoVendasPage() {
 
   useEffect(() => {
     let isMounted = true;
-
-    async function init() {
+    async function loadData() {
       if (isMounted) {
         await carregarVendas();
       }
     }
-    init();
-
+    loadData();
     return () => {
       isMounted = false;
     };
   }, [carregarVendas]);
 
-  const abrirModalEdicao = (venda: Venda) => {
-    setVendaEditando(venda);
-    setEditCliente(venda.cliente || '');
-    setEditFormaPgto(venda.forma_pagamento || 'PIX');
-    setEditValorTotal(venda.valor_total || 0);
-    setEditObservacao(venda.observacao || '');
-    
-    if (venda.created_at) {
-      setEditData(venda.created_at.split('T')[0]);
-    } else {
-      setEditData('');
-    }
-
-    setModalAberto(true);
-  };
-
-  const handleSalvarEdicao = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!vendaEditando) return;
+  const handleExcluirVenda = async (vendaId: string) => {
+    const confirmar = window.confirm(
+      'Tem certeza absoluta que deseja excluir esta venda? O stock dos itens vendidos será devolvido ao inventário de forma automática.'
+    );
+    if (!confirmar) return;
 
     try {
-      setSalvando(true);
-
-      const dadosAtualizados: {
-        cliente: string;
-        forma_pagamento: string;
-        valor_total: number;
-        observacao: string;
-        created_at?: string;
-      } = {
-        cliente: editCliente,
-        forma_pagamento: editFormaPgto,
-        valor_total: Number(editValorTotal),
-        observacao: editObservacao,
-      };
-
-      if (editData) {
-        const horaOriginal = vendaEditando.created_at ? vendaEditando.created_at.split('T')[1] || '00:00:00.000Z' : '00:00:00.000Z';
-        dadosAtualizados.created_at = `${editData}T${horaOriginal}`;
-      }
-
-      const { error } = await supabase
-        .from('vendas')
-        .update(dadosAtualizados)
-        .eq('id', vendaEditando.id);
+      const { error } = await supabase.rpc('estornar_e_excluir_venda', {
+        p_venda_id: vendaId,
+      });
 
       if (error) throw error;
 
-      setVendas((prev) =>
-        prev.map((v) =>
-          v.id === vendaEditando.id
-            ? { ...v, ...dadosAtualizados }
-            : v
-        )
-      );
-
-      setModalAberto(false);
-      setVendaEditando(null);
-      alert('Venda atualizada com sucesso!');
+      alert('Venda excluída e stock estornado com sucesso!');
+      await carregarVendas();
     } catch (err: unknown) {
-      const errorObj = err as { message?: string };
-      console.error('Erro ao atualizar venda:', err);
-      alert(`Erro ao atualizar: ${errorObj.message || 'Erro desconhecido'}`);
-    } finally {
-      setSalvando(false);
-    }
-  };
-
-  const handleExcluir = async (id: string) => {
-    if (!window.confirm('Tens a certeza que pretendes excluir esta venda?')) return;
-
-    try {
-      const { error } = await supabase.from('vendas').delete().eq('id', id);
-      if (error) throw error;
-
-      setVendas((prev) => prev.filter((v) => v.id !== id));
-    } catch (err: unknown) {
-      const errorObj = err as { message?: string };
-      alert(`Erro ao excluir venda: ${errorObj.message}`);
-    }
-  };
-
-  const formatarData = (created_at?: string) => {
-    if (!created_at) return '—';
-    try {
-      const dataStr = created_at.split('T')[0];
-      const [ano, mes, dia] = dataStr.split('-');
-      if (!ano || !mes || !dia) return '—';
-      return `${dia}/${mes}/${ano}`;
-    } catch {
-      return '—';
+      const errObj = err as { message?: string };
+      alert('Erro ao excluir venda e estornar stock: ' + (errObj?.message || 'Erro desconhecido'));
     }
   };
 
   const vendasFiltradas = vendas.filter((v) => {
-    const cliente = (v.cliente || '').toLowerCase();
-    const obs = (v.observacao || '').toLowerCase();
     const termo = filtroBusca.toLowerCase().trim();
+    const bateCliente = v.cliente.toLowerCase().includes(termo);
+    const bateObs = v.observacao ? v.observacao.toLowerCase().includes(termo) : false;
+    const bateBusca = bateCliente || bateObs;
 
-    const bateBusca = cliente.includes(termo) || obs.includes(termo);
-    const bateCliente = filtroCliente === '' || v.cliente === filtroCliente;
-    const bateFormaPgto = filtroFormaPgto === '' || v.forma_pagamento === filtroFormaPgto;
-
-    let dataIso = '';
-    if (v.created_at) {
-      dataIso = v.created_at.split('T')[0];
+    let batePagamento = true;
+    if (filtroPagamento !== 'todos') {
+      const pagVenda = (v.forma_pagamento || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      const pagFiltro = filtroPagamento.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      batePagamento = pagVenda === pagFiltro;
     }
-    const bateDataInicio = !filtroDataInicio || (dataIso && dataIso >= filtroDataInicio);
-    const bateDataFim = !filtroDataFim || (dataIso && dataIso <= filtroDataFim);
 
-    return bateBusca && bateCliente && bateFormaPgto && bateDataInicio && bateDataFim;
+    return bateBusca && batePagamento;
   });
 
-  const clientesUnicos: string[] = Array.from(
-    new Set(vendas.map((v) => v.cliente).filter((c): c is string => typeof c === 'string' && c.trim() !== ''))
-  );
+  const totalFaturado = vendasFiltradas.reduce((acc, v) => acc + (v.valor_total || 0), 0);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-6xl mx-auto space-y-6">
         
-        {/* Cabeçalho */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900 p-5 rounded-xl border border-slate-800 shadow-md">
           <div>
             <h1 className="text-2xl font-bold text-white">Histórico de Vendas</h1>
-            <p className="text-sm text-slate-400">Consulta de pedidos lançados - OrC Brasil</p>
+            <p className="text-sm text-slate-400">OrC Brasil - Controlo Comercial e Faturamento</p>
           </div>
-          <div className="flex items-center gap-3 w-full sm:w-auto">
+          <div className="flex gap-2 w-full sm:w-auto">
             <Link
               href="/vendas/lancar"
-              className="flex-1 sm:flex-none text-center px-4 py-2 text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors shadow-sm"
+              className="flex-1 sm:flex-none px-4 py-2 text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors text-center shadow-sm"
             >
-              + Nova Venda
+              + Registar Nova Venda
             </Link>
             <Link
               href="/"
-              className="flex-1 sm:flex-none text-center px-4 py-2 text-sm font-medium bg-slate-800 text-slate-200 hover:bg-slate-700 rounded-lg transition-colors border border-slate-700"
+              className="px-4 py-2 text-sm font-medium bg-slate-800 text-slate-200 hover:bg-slate-700 rounded-lg transition-colors border border-slate-700 text-center"
             >
-              ← Painel Principal
+              ← Painel
             </Link>
           </div>
         </div>
 
-        {/* Filtros e Tabela */}
-        <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-5">
-          <div className="flex flex-col gap-4 border-b border-slate-800 pb-5">
-            <h2 className="text-lg font-semibold text-slate-200">Filtros de Pesquisa</h2>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Buscar (Cliente/Obs)</label>
-                <input
-                  type="text"
-                  placeholder="Pesquisar..."
-                  value={filtroBusca}
-                  onChange={(e) => setFiltroBusca(e.target.value)}
-                  className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 shadow-md">
+            <span className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Total de Vendas Listadas</span>
+            <div className="text-2xl font-bold text-white mt-1">{vendasFiltradas.length}</div>
+          </div>
+          <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 shadow-md">
+            <span className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Faturamento Filtrado</span>
+            <div className="text-2xl font-bold text-emerald-400 mt-1">R$ {totalFaturado.toFixed(2)}</div>
+          </div>
+        </div>
 
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Cliente</label>
-                <select
-                  value={filtroCliente}
-                  onChange={(e) => setFiltroCliente(e.target.value)}
-                  className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
-                >
-                  <option value="">Todos os Clientes</option>
-                  {clientesUnicos.map((cli) => (
-                    <option key={cli} value={cli}>{cli}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Forma de Pagamento</label>
-                <select
-                  value={filtroFormaPgto}
-                  onChange={(e) => setFiltroFormaPgto(e.target.value)}
-                  className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
-                >
-                  <option value="">Todas as Formas</option>
-                  <option value="PIX">PIX</option>
-                  <option value="DINHEIRO">Dinheiro</option>
-                  <option value="CARTAO">Cartão</option>
-                  <option value="BOLETO">Boleto</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Data Início</label>
-                <input
-                  type="date"
-                  value={filtroDataInicio}
-                  onChange={(e) => setFiltroDataInicio(e.target.value)}
-                  className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Data Fim</label>
-                <input
-                  type="date"
-                  value={filtroDataFim}
-                  onChange={(e) => setFiltroDataFim(e.target.value)}
-                  className="w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
+        <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-4">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+            <h2 className="text-lg font-semibold text-slate-200">Registo de Transações</h2>
+            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+              <select
+                value={filtroPagamento}
+                onChange={(e) => setFiltroPagamento(e.target.value)}
+                className="p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none"
+              >
+                <option value="todos">Todas as Formas de Pagamento</option>
+                <option value="PIX">PIX</option>
+                <option value="CARTAO">Cartão / Cartao</option>
+                <option value="DINHEIRO">Dinheiro</option>
+                <option value="BOLETO">Boleto</option>
+                <option value="TRANSFERENCIA">Transferência</option>
+              </select>
+              <input
+                type="text"
+                placeholder="Pesquisar por cliente ou obs..."
+                value={filtroBusca}
+                onChange={(e) => setFiltroBusca(e.target.value)}
+                className="p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none w-full sm:w-64"
+              />
             </div>
           </div>
 
+          {erro && (
+            <div className="p-4 bg-red-950/50 border border-red-500/30 text-red-400 rounded-lg text-sm">
+              {erro}
+            </div>
+          )}
+
           {carregando ? (
             <div className="p-8 text-center text-slate-400 animate-pulse bg-slate-950/50 rounded-lg border border-slate-800">
-              Carregando histórico de vendas...
-            </div>
-          ) : erro ? (
-            <div className="p-4 border border-red-500/30 bg-red-950/50 text-red-400 rounded-lg text-center text-sm">
-              {erro}
+              A carregar vendas...
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -296,49 +195,49 @@ export default function HistoricoVendasPage() {
                   <tr className="border-b border-slate-800 bg-slate-950/50 text-xs font-bold text-slate-400 uppercase tracking-wider">
                     <th className="p-3.5">Data</th>
                     <th className="p-3.5">Cliente</th>
-                    <th className="p-3.5">Forma Pgto</th>
-                    <th className="p-3.5">Observação (Produtos / Quantidades)</th>
-                    <th className="p-3.5">Valor Total</th>
+                    <th className="p-3.5">Pagamento</th>
+                    <th className="p-3.5">Observação / Itens</th>
+                    <th className="p-3.5 text-right">Valor Total</th>
                     <th className="p-3.5 text-center">Ações</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800/60">
+                <tbody className="divide-y divide-slate-800/60 text-sm">
                   {vendasFiltradas.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="text-center p-8 text-slate-500 font-medium">
+                      <td colSpan={6} className="text-center p-8 text-slate-500">
                         Nenhuma venda encontrada.
                       </td>
                     </tr>
                   ) : (
-                    vendasFiltradas.map((v) => (
-                      <tr key={v.id} className="hover:bg-slate-800/40 transition-colors">
-                        <td className="p-3.5 text-sm font-medium text-slate-300 whitespace-nowrap">
-                          {formatarData(v.created_at)}
+                    vendasFiltradas.map((venda) => (
+                      <tr key={venda.id} className="hover:bg-slate-800/40 transition-colors">
+                        <td className="p-3.5 text-slate-300 whitespace-nowrap">
+                          {formatarData(venda.created_at)}
                         </td>
-                        <td className="p-3.5 font-semibold text-slate-100">
-                          {v.cliente || 'Cliente Avulso'}
-                        </td>
+                        <td className="p-3.5 font-semibold text-white">{venda.cliente}</td>
                         <td className="p-3.5">
-                          <span className="px-2 py-1 bg-slate-800 text-slate-200 border border-slate-700 rounded text-xs font-bold">
-                            {v.forma_pagamento || 'PIX'}
+                          <span className="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-xs font-semibold text-slate-300">
+                            {venda.forma_pagamento}
                           </span>
                         </td>
-                        <td className="p-3.5 text-slate-300 text-sm whitespace-pre-line">
-                          {v.observacao && v.observacao.trim() !== '' ? v.observacao : '—'}
+                        <td className="p-3.5 text-slate-300 max-w-xs truncate" title={venda.observacao || ''}>
+                          {venda.observacao || '—'}
                         </td>
-                        <td className="p-3.5 font-bold text-emerald-400">
-                          R$ {Number(v.valor_total || 0).toFixed(2)}
+                        <td className="p-3.5 text-right font-bold text-emerald-400 whitespace-nowrap">
+                          R$ {(venda.valor_total || 0).toFixed(2)}
                         </td>
-                        <td className="p-3.5 text-center space-x-2 whitespace-nowrap">
+                        <td className="p-3.5 text-center whitespace-nowrap space-x-2">
                           <button
-                            onClick={() => abrirModalEdicao(v)}
-                            className="px-2.5 py-1.5 bg-blue-950/40 hover:bg-blue-900/60 text-blue-400 hover:text-blue-300 border border-blue-800/50 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                            type="button"
+                            onClick={() => setVendaSelecionada(venda)}
+                            className="px-2.5 py-1 bg-blue-950/60 hover:bg-blue-900 text-blue-400 border border-blue-800/50 rounded text-xs font-semibold cursor-pointer"
                           >
-                            Editar
+                            Detalhes
                           </button>
                           <button
-                            onClick={() => handleExcluir(v.id)}
-                            className="px-2.5 py-1.5 bg-red-950/40 hover:bg-red-900/60 text-red-400 hover:text-red-300 border border-red-800/50 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                            type="button"
+                            onClick={() => handleExcluirVenda(venda.id)}
+                            className="px-2.5 py-1 bg-rose-950/60 hover:bg-rose-900 text-rose-400 border border-rose-800/50 rounded text-xs font-semibold cursor-pointer"
                           >
                             Excluir
                           </button>
@@ -354,107 +253,71 @@ export default function HistoricoVendasPage() {
 
       </div>
 
-      {/* POPUP / MODAL DE EDIÇÃO */}
-      {modalAberto && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex justify-center items-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5">
+      {vendaSelecionada && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl w-full max-w-lg space-y-4 shadow-2xl">
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-              <h2 className="text-lg font-bold text-white">Editar Venda</h2>
+              <div>
+                <h3 className="text-lg font-bold text-white">Detalhes da Venda</h3>
+                <p className="text-xs text-slate-400">Cliente: <span className="text-emerald-400 font-semibold">{vendaSelecionada.cliente}</span></p>
+              </div>
               <button
-                onClick={() => setModalAberto(false)}
-                className="text-slate-400 hover:text-white text-sm font-bold cursor-pointer"
+                type="button"
+                onClick={() => setVendaSelecionada(null)}
+                className="text-slate-400 hover:text-white text-sm font-bold px-3 py-1 bg-slate-800 rounded-lg cursor-pointer"
               >
                 ✕
               </button>
             </div>
 
-            <form onSubmit={handleSalvarEdicao} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                    Cliente
-                  </label>
-                  <input
-                    type="text"
-                    value={editCliente}
-                    onChange={(e) => setEditCliente(e.target.value)}
-                    className="w-full p-3 border border-slate-700 rounded-xl bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                    Data da Venda
-                  </label>
-                  <input
-                    type="date"
-                    value={editData}
-                    onChange={(e) => setEditData(e.target.value)}
-                    className="w-full p-3 border border-slate-700 rounded-xl bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
+            <div className="space-y-3 text-sm text-slate-300">
+              <div className="flex justify-between">
+                <span>Data:</span>
+                <span className="font-medium text-white">{formatarData(vendaSelecionada.created_at)}</span>
               </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                    Forma de Pagamento
-                  </label>
-                  <select
-                    value={editFormaPgto}
-                    onChange={(e) => setEditFormaPgto(e.target.value)}
-                    className="w-full p-3 border border-slate-700 rounded-xl bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="PIX">PIX</option>
-                    <option value="DINHEIRO">Dinheiro</option>
-                    <option value="CARTAO">Cartão</option>
-                    <option value="BOLETO">Boleto</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                    Valor Total (R$)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={editValorTotal}
-                    onChange={(e) => setEditValorTotal(Number(e.target.value))}
-                    className="w-full p-3 border border-slate-700 rounded-xl bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
+              <div className="flex justify-between">
+                <span>Forma de Pagamento:</span>
+                <span className="font-medium text-white">{vendaSelecionada.forma_pagamento}</span>
               </div>
-
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                  Observação (Produtos / Quantidades)
-                </label>
-                <textarea
-                  rows={3}
-                  value={editObservacao}
-                  onChange={(e) => setEditObservacao(e.target.value)}
-                  className="w-full p-3 border border-slate-700 rounded-xl bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                />
-              </div>
+                <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Itens do Pedido:</span>
+                <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-2 max-h-48 overflow-y-auto">
+                  {vendaSelecionada.itens_venda && vendaSelecionada.itens_venda.length > 0 ? (
+                    vendaSelecionada.itens_venda.map((item) => {
+                      const nomeProd = Array.isArray(item.produtos)
+                        ? item.produtos[0]?.nome
+                        : item.produtos?.nome;
 
-              <div className="flex justify-end gap-3 pt-3">
-                <button
-                  type="button"
-                  onClick={() => setModalAberto(false)}
-                  className="px-4 py-2.5 text-sm font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition-colors border border-slate-700 cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={salvando}
-                  className="px-5 py-2.5 text-sm font-bold bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-colors shadow-lg shadow-blue-950 disabled:opacity-50 cursor-pointer"
-                >
-                  {salvando ? 'A salvar...' : 'Salvar Alterações'}
-                </button>
+                      return (
+                        <div key={item.id} className="flex justify-between items-center text-xs border-b border-slate-800/60 pb-1.5 last:border-0">
+                          <div>
+                            <span className="font-semibold text-white">{nomeProd || 'Produto'}</span>
+                            <span className="text-slate-400 ml-2">({item.quantidade}x R$ {item.preco_unitario.toFixed(2)})</span>
+                          </div>
+                          <span className="font-bold text-emerald-400">R$ {item.subtotal.toFixed(2)}</span>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="text-xs text-slate-500">Sem itens registados em detalhe.</div>
+                  )}
+                </div>
               </div>
-            </form>
+              <div className="flex justify-between items-center pt-2 border-t border-slate-800 text-base font-bold">
+                <span className="text-slate-200">Valor Total:</span>
+                <span className="text-emerald-400">R$ {(vendaSelecionada.valor_total || 0).toFixed(2)}</span>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setVendaSelecionada(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm font-medium cursor-pointer"
+              >
+                Fechar
+              </button>
+            </div>
           </div>
         </div>
       )}

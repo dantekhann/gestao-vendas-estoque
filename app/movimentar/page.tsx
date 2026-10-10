@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { registarMovimentacaoEstoque } from '@/lib/estoque';
 
 interface Produto {
   id: string;
@@ -70,10 +71,9 @@ export default function MovimentarEstoquePage() {
     (p.sku && p.sku.toLowerCase().includes(termoBusca.toLowerCase()))
   );
 
-  async function handleSubmit(e: React.FormEvent) {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Trava rígida de duplo clique imediata
     if (carregando) return;
     setCarregando(true);
 
@@ -91,53 +91,17 @@ export default function MovimentarEstoquePage() {
     try {
       setErro(null);
 
-      // 1. Buscar o estoque REAL diretamente do banco no momento exato do clique
-      const { data: prodAtual, error: errBusca } = await supabase
-        .from('produtos')
-        .select('estoque_atual')
-        .eq('id', produtoSelecionado.id)
-        .single();
-
-      if (errBusca) throw errBusca;
-
-      const estoqueAtual = Number(prodAtual?.estoque_atual) || 0;
-      let novoEstoque = estoqueAtual;
-      const qtdNum = Number(quantidade);
-
-      if (tipo === 'ENTRADA') {
-        novoEstoque = estoqueAtual + qtdNum;
-      } else if (tipo === 'SAIDA') {
-        novoEstoque = estoqueAtual - qtdNum;
-      } else if (tipo === 'AJUSTE') {
-        novoEstoque = qtdNum;
-      }
-
-      if (novoEstoque < 0) {
-        throw new Error(`Estoque insuficiente. O estoque atual é de ${estoqueAtual} unidades.`);
-      }
-
-      // 2. Atualizar o estoque na tabela produtos de forma direta
-      const { error: errUpdate } = await supabase
-        .from('produtos')
-        .update({ estoque_atual: novoEstoque })
-        .eq('id', produtoSelecionado.id);
-
-      if (errUpdate) throw errUpdate;
-
-      // 3. Registar o histórico na tabela de movimentações
       const dataHoje = new Date().toISOString().split('T')[0];
       const obsComData = `[Data: ${dataHoje}] ${observacao}`.trim();
 
-      const { error: errMov } = await supabase.from('movimentacoes_estoque').insert([
-        {
-          produto_id: produtoSelecionado.id,
-          tipo,
-          quantidade: tipo === 'AJUSTE' ? Math.abs(novoEstoque - estoqueAtual) : qtdNum,
-          observacao: obsComData,
-        },
-      ]);
-
-      if (errMov) throw errMov;
+      // Utilizar a função centralizada e atômica que processa o estoque e a sincronização do Velcro
+      await registarMovimentacaoEstoque({
+        produtoId: produtoSelecionado.id,
+        tipo,
+        quantidade: Number(quantidade),
+        observacao: obsComData,
+        sincronizarVelcro: true,
+      });
 
       router.push('/movimentacoes');
       router.refresh();
@@ -147,13 +111,12 @@ export default function MovimentarEstoquePage() {
       setErro(errorObj?.message || 'Erro ao processar movimentação.');
       setCarregando(false);
     }
-  }
+  };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 py-12 px-4 sm:px-6 lg:px-8 flex justify-center items-center">
       <div className="max-w-xl w-full space-y-6">
         
-        {/* Cabeçalho */}
         <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-xl flex justify-between items-center">
           <div>
             <h1 className="text-2xl font-bold text-white">Lançar Movimentação</h1>
@@ -168,7 +131,6 @@ export default function MovimentarEstoquePage() {
           </button>
         </div>
 
-        {/* Formulário */}
         <form onSubmit={handleSubmit} className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-xl space-y-5">
           {erro && (
             <div className="p-3.5 border border-red-500/30 bg-red-950/50 text-red-400 rounded-xl text-sm">
@@ -176,14 +138,13 @@ export default function MovimentarEstoquePage() {
             </div>
           )}
 
-          {/* Campo de Busca de Item com Dropdown Flutuante */}
           <div className="space-y-1.5 relative" ref={dropdownRef}>
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
               BUSCAR E SELECIONAR ITEM
             </label>
             <input
               type="text"
-              placeholder="Digite para buscar (ex: Yerba, Caixa, Alcool...)"
+              placeholder="Digite para buscar (ex: Yerba, Velcro...)"
               value={produtoSelecionado ? produtoSelecionado.nome : termoBusca}
               onFocus={() => setMostrarDropdown(true)}
               onChange={(e) => {
@@ -197,7 +158,6 @@ export default function MovimentarEstoquePage() {
               * Clique ou digite no campo acima para filtrar a lista instantaneamente.
             </p>
 
-            {/* Lista suspensa (Dropdown) */}
             {!produtoSelecionado && mostrarDropdown && (
               <div className="absolute z-20 w-full mt-1 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl max-h-52 overflow-y-auto divide-y divide-slate-800">
                 {produtosFiltrados.length === 0 ? (
@@ -243,7 +203,6 @@ export default function MovimentarEstoquePage() {
             </div>
           )}
 
-          {/* Tipo de Movimentação */}
           <div className="space-y-1.5">
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
               TIPO DE MOVIMENTAÇÃO
@@ -285,7 +244,6 @@ export default function MovimentarEstoquePage() {
             </div>
           </div>
 
-          {/* Quantidade */}
           <div className="space-y-1.5">
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
               QUANTIDADE
@@ -300,21 +258,19 @@ export default function MovimentarEstoquePage() {
             />
           </div>
 
-          {/* Observação */}
           <div className="space-y-1.5">
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
               OBSERVAÇÃO (OPCIONAL)
             </label>
             <textarea
               rows={3}
-              placeholder="Ex: Reposição de lote, contagem física, acerto de inventário..."
+              placeholder="Ex: Reposição de lote, contagem física..."
               value={observacao}
               onChange={(e) => setObservacao(e.target.value)}
               className="w-full p-3 border border-slate-700 rounded-xl bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
             />
           </div>
 
-          {/* Botão de Confirmação */}
           <div className="pt-2">
             <button
               type="submit"
