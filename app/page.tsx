@@ -1,8 +1,9 @@
-'use client';
+'use client'
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
+
 
 interface Produto {
   id: string;
@@ -64,6 +65,7 @@ function obterEstiloRotulo(rotulo: string) {
 
 export default function EstoquePage() {
   const router = useRouter();
+  const supabase = createClient()
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [busca, setBusca] = useState('');
   const [categoriaFiltro, setCategoriaFiltro] = useState('TODAS');
@@ -87,7 +89,7 @@ export default function EstoquePage() {
       }
     }
     carregarEstoque();
-  }, []);
+  }, [supabase]);
 
   const produtosFiltrados = produtos.filter((p) => {
     const rotuloAtual = formatarRotulo(p.classificacao, p.categoria, p.tipo, p.nome);

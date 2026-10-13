@@ -1,20 +1,16 @@
-'use client';
+'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
-import { registarMovimentacaoEstoque } from '@/lib/estoque';
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
+import { registarMovimentacaoEstoque } from '@/lib/estoque'
+import type { Produto } from '@/lib/types'
 
-interface Produto {
-  id: string;
-  nome: string;
-  sku?: string;
-  estoque_atual: number;
-}
 
 export default function MovimentarEstoquePage() {
   const router = useRouter();
   const [produtos, setProdutos] = useState<Produto[]>([]);
+  const supabase = createClient()
   const [termoBusca, setTermoBusca] = useState<string>('');
   const [produtoSelecionado, setProdutoSelecionado] = useState<Produto | null>(null);
   const [mostrarDropdown, setMostrarDropdown] = useState<boolean>(false);
@@ -41,7 +37,7 @@ export default function MovimentarEstoquePage() {
     } catch {
       setErro('Erro ao carregar lista de produtos.');
     }
-  }, []);
+  }, [supabase]);
 
   useEffect(() => {
     let isMounted = true;

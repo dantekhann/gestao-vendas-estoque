@@ -1,8 +1,9 @@
-'use client';
+'use client'
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
+// + demais imports originais (Link, tipos, utilitários, se existiam)
 
 interface Produto {
   id: string;
@@ -23,6 +24,7 @@ interface ItemProcessado {
 export default function InventarioWhatsAppPage() {
   const router = useRouter();
   const [produtos, setProdutos] = useState<Produto[]>([]);
+  const supabase = createClient()
   const [textoWhatsApp, setTextoWhatsApp] = useState<string>('');
   const [itensProcessados, setItensProcessados] = useState<ItemProcessado[]>([]);
   const [carregando, setCarregando] = useState<boolean>(false);
@@ -50,7 +52,7 @@ export default function InventarioWhatsAppPage() {
     }
 
     carregarProdutos();
-  }, []);
+  }, [supabase]);
 
   const extrairQuantidadeComExtenso = (texto: string): { quantidade: number; textoRestante: string } => {
     let textoLower = texto.toLowerCase().trim();

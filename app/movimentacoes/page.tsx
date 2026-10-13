@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link';
-import { supabase } from '@/lib/supabase';
 import { formatarData } from '@/lib/formatters';
 
 interface Produto {
@@ -26,7 +26,7 @@ export default function MovimentacoesPage() {
   const [movimentacoes, setMovimentacoes] = useState<Movimentacao[]>([]);
   const [carregando, setCarregando] = useState<boolean>(true);
   const [erro, setErro] = useState<string | null>(null);
-
+  const supabase = createClient()
   const [filtroTipo, setFiltroTipo] = useState<string>('TODOS');
   const [filtroBusca, setFiltroBusca] = useState<string>('');
 
@@ -51,7 +51,7 @@ export default function MovimentacoesPage() {
     } finally {
       setCarregando(false);
     }
-  }, []);
+  }, [supabase]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect

@@ -1,13 +1,14 @@
-'use client';
+'use client'
 
-import React, { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
-import { Produto, ItemVenda } from '@/lib/types';
-import { FORMAS_PAGAMENTO } from '@/lib/constants';
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
+import type { Produto, ItemVenda } from '@/lib/types'
+import { FORMAS_PAGAMENTO } from '@/lib/constants'
 
 export default function NovaVendaPage() {
   const router = useRouter();
+  const supabase = createClient()
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [listaClientes, setListaClientes] = useState<string[]>(['Cliente Avulso']);
   const [, setCarregando] = useState<boolean>(true);
@@ -63,6 +64,7 @@ export default function NovaVendaPage() {
           });
           setProdutos(produtosValidos);
         }
+        
 
         // 2. Carregar Clientes do Supabase
         const { data: cliData, error: cliError } = await supabase
@@ -85,7 +87,7 @@ export default function NovaVendaPage() {
       }
     }
     carregarDadosIniciais();
-  }, []);
+  }, [supabase]);
 
   const handleCadastrarNovoCliente = async () => {
     const nomeLimpo = novoClienteNome.trim();
@@ -248,13 +250,13 @@ export default function NovaVendaPage() {
               }
             }
 
-            const subtotal = quantidade * precoUnitario;
+            const subtotal = quantidade * (Number(precoUnitario) || 0);
 
             itensMapeados.push({
               produto_id: prod.id,
               nome: prod.nome,
               quantidade: quantidade,
-              preco_unitario: precoUnitario,
+              preco_unitario: prod.preco_venda ?? 0,
               subtotal: subtotal
             });
           }
@@ -576,7 +578,7 @@ export default function NovaVendaPage() {
                 <datalist id="lista-produtos">
                   {produtos.map((p) => (
                     <option key={p.id} value={p.nome}>
-                      Estoque: {p.estoque_atual} | R$ {p.preco_venda.toFixed(2)}
+                      Estoque: {(p.preco_venda ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                     </option>
                   ))}
                 </datalist>

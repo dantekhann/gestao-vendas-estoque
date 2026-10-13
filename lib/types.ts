@@ -3,22 +3,33 @@
 export type TipoMovimentacao = 'ENTRADA' | 'SAIDA' | 'AJUSTE' | 'VENDA';
 
 export interface Produto {
-  id: string;
-  nome: string;
-  categoria?: string | null;
-  tipo?: string | null;
-  classificacao?: string | null;
-  ativo?: boolean | null;
-  preco_venda: number;
-  estoque_atual: number;
+  id: string
+  nome: string
+  sku?: string | null          // ← ADICIONE (a busca nem sempre traz sku)
+  classificacao?: string | null
+  categoria?: string | null
+  tipo?: string | null
+  estoque_atual: number
+  estoque_minimo?: number | null
+  preco_venda?: number | null  // ← TORNE OPCIONAL (era obrigatório)
 }
 
-export interface ItemVenda {
+export interface Venda {
+  id: string
+  cliente: string
   produto_id: string;
   nome: string;
   quantidade: number;
   preco_unitario: number;
   subtotal: number;
+}
+
+export interface ItemVenda {
+  produto_id: string
+  nome: string        // ou produto_nome — confira como a página usa
+  quantidade: number
+  preco_unitario: number
+  subtotal: number
 }
 
 export interface Movimentacao {

@@ -1,9 +1,9 @@
-'use client';
+'use client'
 
-import { useState, useEffect, useCallback } from 'react';
-import Link from 'next/link';
-import { supabase } from '@/lib/supabase';
-import { formatarData } from '@/lib/formatters';
+import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
+import { createClient } from '@/lib/supabase/client'
+import { formatarData } from '@/lib/formatters'
 
 interface ItemVendaDetalhe {
   id: string;
@@ -26,6 +26,7 @@ interface Venda {
 }
 
 export default function VendasPage() {
+  const supabase = createClient()
   const [vendas, setVendas] = useState<Venda[]>([]);
   const [carregando, setCarregando] = useState<boolean>(true);
   const [erro, setErro] = useState<string | null>(null);
@@ -62,7 +63,7 @@ export default function VendasPage() {
     } finally {
       setCarregando(false);
     }
-  }, []);
+  }, [supabase]);
 
   useEffect(() => {
     let isMounted = true;

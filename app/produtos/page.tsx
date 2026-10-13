@@ -1,10 +1,11 @@
-'use client';
+'use client'
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import Link from 'next/link';
-import { z } from 'zod';
-import { supabase } from '@/lib/supabase';
-import { formatarData } from '@/lib/formatters';
+import React from 'react'                                    // resolve os 3 erros "React UMD"
+import { useState, useEffect, useRef, useCallback } from 'react'
+import Link from 'next/link'                                 // resolve os 4 erros "Link"
+import { z } from 'zod'                                      // resolve os 9 erros "z"
+import { createClient } from '@/lib/supabase/client'
+import { formatarData } from '@/lib/formatters'              // resolve os 4 erros "formatarData"
 
 // Esquema de validação com Zod
 const produtoSchema = z.object({
@@ -64,7 +65,7 @@ export default function ProdutosAdminPage() {
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [carregando, setCarregando] = useState<boolean>(true);
   const [, setErro] = useState<string | null>(null);
-  
+  const supabase = createClient()
   const [filtroBusca, setFiltroBusca] = useState<string>('');
   const [filtroStatus, setFiltroStatus] = useState<string>('ativos');
   const [filtroClassificacao, setFiltroClassificacao] = useState<string>('todas');
@@ -140,7 +141,7 @@ export default function ProdutosAdminPage() {
     } finally {
       setCarregando(false);
     }
-  }, []);
+  }, [supabase]);
 
   useEffect(() => {
     let isMounted = true;
@@ -159,7 +160,7 @@ export default function ProdutosAdminPage() {
     }
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [supabase]);
 
   const selecionarProdutoAutocomplete = (prod: Produto) => {
     setProdutoSelecionadoId(prod.id);
