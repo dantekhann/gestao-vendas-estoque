@@ -36,7 +36,7 @@ export default function MovimentacoesPage() {
       setErro(null);
 
       const { data, error } = await supabase
-        .from('movimentacoes_estoque')
+        .from('movimentacoes')
         .select('*, produtos (id, nome, estoque_atual)')
         .order('created_at', { ascending: false })
         .range(0, 199);

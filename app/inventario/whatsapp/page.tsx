@@ -51,54 +51,36 @@ export default function InventarioWhatsAppPage() {
   };
 
   const aplicarInventario = async () => {
-    if (itensProcessados.length === 0) return;
-    try {
-      setSalvando(true);
-      setErro(null);
-      const dataHoje = new Date().toISOString().split('T')[0];
-      for (const item of itensProcessados) {
-        let produtoId = item.produto_id;
-        const qtdInteira = Math.round(item.quantidade_contada);
-        const diferencaInteira = Math.round(item.diferenca);
-        if (!item.encontrado || !produtoId) {
-          const { data: novoProd, error: errCriacao } = await supabase
-            .from('produtos')
-            .insert([{ nome: item.nomeCatalogo, estoque_atual: qtdInteira }])
-            .select('id')
-            .single();
-          if (errCriacao) throw errCriacao;
-          produtoId = novoProd.id;
-        } else {
-          const { error: prodError } = await supabase
-            .from('produtos')
-            .update({ estoque_atual: qtdInteira })
-            .eq('id', produtoId);
-          if (prodError) throw prodError;
-        }
-        const { error: movError } = await supabase.from('movimentacoes').insert([
-          {
-            produto_id: produtoId,
-            tipo: 'AJUSTE',
-            quantidade: Math.abs(diferencaInteira),
-            observacao: `Inventário WhatsApp (Anterior: ${item.estoque_antigo} -> Novo: ${qtdInteira})`,
-            created_at: `${dataHoje}T12:00:00.000Z`,
-          },
-        ]);
-        if (movError) throw movError;
-      }
-      alert('Inventário aplicado com sucesso aos produtos oficiais!');
-      router.push('/produtos');
-      router.refresh();
-    } catch (err: unknown) {
-      console.error('Erro detalhado do Supabase:', err);
-      const errObj = err as Record<string, unknown>;
-      const mensagemErro = (errObj?.message as string) || (errObj?.error_description as string) || JSON.stringify(err);
-      setErro(mensagemErro);
-      alert(`Erro ao salvar no Supabase: ${mensagemErro}`);
-    } finally {
-      setSalvando(false);
-    }
-  };
+  if (itensProcessados.length === 0) return;
+  try {
+    setSalvando(true);
+    setErro(null);
+
+    const payload = itensProcessados.map((item) => ({
+      produto_id: item.produto_id ?? null,
+      nomeCatalogo: item.nomeCatalogo,
+      quantidade_contada: Math.round(item.quantidade_contada),
+    }));
+
+    const { data, error } = await supabase.rpc('aplicar_inventario', {
+      itens: payload,
+    });
+
+    if (error) throw error;
+
+    const criados = (data ?? []).filter((r: any) => r.criado).length;
+    alert(`Inventário aplicado com sucesso! (${itensProcessados.length - criados} atualizados, ${criados} criados)`);
+    router.push('/produtos');
+    router.refresh();
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('Erro ao aplicar inventário:', msg);
+    setErro(msg);
+    alert(`Erro ao aplicar inventário: ${msg}`);
+  } finally {
+    setSalvando(false);
+  }
+};
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 py-8 px-4 sm:px-6 lg:px-8">
