@@ -203,6 +203,15 @@ function encontrarProduto(nomeTexto: string, produtos: ProdutoInput[]): ProdutoI
   if (tTok.length === 0) return undefined;
   const quals = tTok.filter((t) => QUALIFICADORES.has(t));
 
+  // 0ª passada: match EXATO de nome — resolve colisões tipo "Velcro (pares)" vs "Velcro (pacotes)"
+  // (ignora conectivos que sobram da extração da quantidade, ex.: "Velcro (pares) com")
+  const tNorm = normalizar(nomeTexto)
+    .split(' ')
+    .filter(Boolean)
+    .filter((t) => !CONECTIVOS.has(t))
+    .join(' ');
+  const exato = produtos.find((p) => normalizar(p.nome) === tNorm);
+  if (exato) return exato;
   let melhor: ProdutoInput | undefined;
   let melhorScore = 0;
 

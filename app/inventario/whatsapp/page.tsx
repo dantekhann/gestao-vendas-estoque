@@ -38,9 +38,10 @@ export default function InventarioWhatsAppPage() {
     async function carregarProdutos() {
       try {
         setCarregando(true);
-        const { data, error } = await supabase
+                const { data, error } = await supabase
           .from('produtos')
           .select('id, nome, estoque_atual')
+          .eq('ativo', true)                    // ← linha nova
           .order('nome', { ascending: true })
           .range(0, 999);
         if (error) throw error;

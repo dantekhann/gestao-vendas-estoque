@@ -64,8 +64,8 @@ const OPCOES_CLASSIFICACAO = [
 // Velcro vive em pares: cada pacote tem 100 pares
 function formatarEstoque(nome: string, atual: number): string {
   if (!nome.toLowerCase().includes('pares')) return `${atual} un`;
-  const pacotes = Math.floor(atual / 100);
-  const soltos = atual % 100;
+  const pacotes = Math.floor(atual / 504);
+  const soltos = atual % 504;
   const detalhe = pacotes > 0
     ? (soltos > 0 ? `${pacotes} pacote(s) + ${soltos} solto(s)` : `${pacotes} pacote(s)`)
     : `${soltos} solto(s)`;

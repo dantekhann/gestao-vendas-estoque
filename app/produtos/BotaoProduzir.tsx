@@ -10,8 +10,8 @@ interface Receita { display_id: string; insumo_id: string; quantidade: number; }
 // Velcro vive em pares: traduz para pacotes + soltos na exibição
 function textoConsumo(nome: string, consumo: number): string {
   if (nome.toLowerCase().includes('pares')) {
-    const pacotes = Math.floor(consumo / 100);
-    const soltos = consumo % 100;
+    const pacotes = Math.floor(consumo / 504);
+    const soltos = consumo % 504;
     const partes = [
       pacotes > 0 ? `${pacotes} pacote(s)` : null,
       soltos > 0 ? `${soltos} solto(s)` : null,
