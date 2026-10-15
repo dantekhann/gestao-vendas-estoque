@@ -61,6 +61,17 @@ const OPCOES_CLASSIFICACAO = [
   'EPI'
 ];
 
+// Velcro vive em pares: cada pacote tem 100 pares
+function formatarEstoque(nome: string, atual: number): string {
+  if (!nome.toLowerCase().includes('pares')) return `${atual} un`;
+  const pacotes = Math.floor(atual / 100);
+  const soltos = atual % 100;
+  const detalhe = pacotes > 0
+    ? (soltos > 0 ? `${pacotes} pacote(s) + ${soltos} solto(s)` : `${pacotes} pacote(s)`)
+    : `${soltos} solto(s)`;
+  return `${atual} pares (${detalhe})`;
+}
+
 export default function ProdutosAdminPage() {
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
@@ -872,8 +883,8 @@ export default function ProdutosAdminPage() {
                             </div>
                           ) : (
                             <span className={`px-2 py-0.5 rounded text-xs font-bold ${atual <= minimo ? 'bg-amber-950 text-amber-300' : 'bg-emerald-950 text-emerald-400'}`}>
-                              {atual} un (Mín: {minimo})
-                            </span>
+  {formatarEstoque(prod.nome, atual)} (Mín: {minimo})
+</span>
                           )}
                         </td>
                         <td className="p-3.5 text-center text-slate-300 text-xs font-medium">
