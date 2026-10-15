@@ -3,9 +3,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { registarMovimentacaoEstoque } from '@/lib/estoque'
+import { registarMovimentacaoEstoque, PROPORCAO_VELCRO_PAR_PACOTE } from '@/lib/estoque'
 import type { Produto } from '@/lib/types'
-
 
 export default function MovimentarEstoquePage() {
   const router = useRouter();
@@ -14,15 +13,17 @@ export default function MovimentarEstoquePage() {
   const [termoBusca, setTermoBusca] = useState<string>('');
   const [produtoSelecionado, setProdutoSelecionado] = useState<Produto | null>(null);
   const [mostrarDropdown, setMostrarDropdown] = useState<boolean>(false);
-  
   const [tipo, setTipo] = useState<'ENTRADA' | 'SAIDA' | 'AJUSTE'>('ENTRADA');
   const [quantidade, setQuantidade] = useState<number>(1);
+  const [unidadeVelcro, setUnidadeVelcro] = useState<'pares' | 'pacotes'>('pares');
   const [observacao, setObservacao] = useState<string>('');
-  
   const [carregando, setCarregando] = useState<boolean>(false);
   const [erro, setErro] = useState<string | null>(null);
-  
+  const [sucesso, setSucesso] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Detecta se o produto selecionado é velcro (exibe o seletor de unidade)
+  const ehVelcro = produtoSelecionado?.nome.toLowerCase().includes('velcro') || false;
 
   const carregarProdutos = useCallback(async () => {
     try {
@@ -31,7 +32,6 @@ export default function MovimentarEstoquePage() {
         .select('id, nome, sku, estoque_atual')
         .eq('ativo', true)
         .order('nome', { ascending: true });
-
       if (error) throw error;
       if (data) setProdutos(data);
     } catch {
@@ -41,37 +41,35 @@ export default function MovimentarEstoquePage() {
 
   useEffect(() => {
     let isMounted = true;
-
     async function init() {
       if (isMounted) {
         await carregarProdutos();
       }
     }
     init();
-
     function handleClickOutside(event: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setMostrarDropdown(false);
       }
     }
     document.addEventListener('mousedown', handleClickOutside);
-    
     return () => {
       isMounted = false;
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [carregarProdutos]);
 
-  const produtosFiltrados = produtos.filter(p => 
-    p.nome.toLowerCase().includes(termoBusca.toLowerCase()) || 
+  const produtosFiltrados = produtos.filter(p =>
+    p.nome.toLowerCase().includes(termoBusca.toLowerCase()) ||
     (p.sku && p.sku.toLowerCase().includes(termoBusca.toLowerCase()))
   );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
     if (carregando) return;
     setCarregando(true);
+    setErro(null);
+    setSucesso(null);
 
     if (!produtoSelecionado) {
       setErro('Selecione um produto da lista.');
@@ -85,22 +83,39 @@ export default function MovimentarEstoquePage() {
     }
 
     try {
-      setErro(null);
+      // Conversão de unidade para velcro: pacotes → pares
+      let quantidadeFinal = Number(quantidade);
+      let textoUnidade = '';
+
+      if (ehVelcro && unidadeVelcro === 'pacotes') {
+        const pares = quantidadeFinal * PROPORCAO_VELCRO_PAR_PACOTE;
+        textoUnidade = `${quantidadeFinal} pacote(s) = ${pares} pares`;
+        quantidadeFinal = pares;
+      }
 
       const dataHoje = new Date().toISOString().split('T')[0];
-      const obsComData = `[Data: ${dataHoje}] ${observacao}`.trim();
+      const partesObs = [textoUnidade, observacao].filter(Boolean).join(' | ');
+      const obsComData = `[Data: ${dataHoje}] ${partesObs}`.trim();
 
-      // Utilizar a função centralizada e atômica que processa o estoque e a sincronização do Velcro
       await registarMovimentacaoEstoque({
         produtoId: produtoSelecionado.id,
         tipo,
-        quantidade: Number(quantidade),
+        quantidade: quantidadeFinal,
         observacao: obsComData,
-        sincronizarVelcro: false,
+        sincronizarVelcro: false, // a conversão de unidade acontece aqui na página
       });
 
-      router.push('/movimentacoes');
-      router.refresh();
+      setSucesso(
+        `Movimentação registrada: ${tipo} de ${quantidadeFinal} un em ${produtoSelecionado.nome}${textoUnidade ? ` (${textoUnidade})` : ''}.`
+      );
+
+      // Limpa o formulário para o próximo lançamento
+      setProdutoSelecionado(null);
+      setTermoBusca('');
+      setQuantidade(1);
+      setUnidadeVelcro('pares');
+      setObservacao('');
+      setCarregando(false);
     } catch (err: unknown) {
       const errorObj = err as { message?: string };
       console.error('Erro ao registar movimentação:', errorObj);
@@ -112,7 +127,6 @@ export default function MovimentarEstoquePage() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 py-12 px-4 sm:px-6 lg:px-8 flex justify-center items-center">
       <div className="max-w-xl w-full space-y-6">
-        
         <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-xl flex justify-between items-center">
           <div>
             <h1 className="text-2xl font-bold text-white">Lançar Movimentação</h1>
@@ -126,14 +140,17 @@ export default function MovimentarEstoquePage() {
             ← Voltar
           </button>
         </div>
-
         <form onSubmit={handleSubmit} className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-xl space-y-5">
           {erro && (
             <div className="p-3.5 border border-red-500/30 bg-red-950/50 text-red-400 rounded-xl text-sm">
               {erro}
             </div>
           )}
-
+          {sucesso && (
+            <div className="p-3.5 border border-emerald-500/30 bg-emerald-950/50 text-emerald-400 rounded-xl text-sm">
+              ✅ {sucesso}
+            </div>
+          )}
           <div className="space-y-1.5 relative" ref={dropdownRef}>
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
               BUSCAR E SELECIONAR ITEM
@@ -153,7 +170,6 @@ export default function MovimentarEstoquePage() {
             <p className="text-[11px] text-amber-500/90 font-medium">
               * Clique ou digite no campo acima para filtrar a lista instantaneamente.
             </p>
-
             {!produtoSelecionado && mostrarDropdown && (
               <div className="absolute z-20 w-full mt-1 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl max-h-52 overflow-y-auto divide-y divide-slate-800">
                 {produtosFiltrados.length === 0 ? (
@@ -179,7 +195,6 @@ export default function MovimentarEstoquePage() {
               </div>
             )}
           </div>
-
           {produtoSelecionado && (
             <div className="p-3 bg-emerald-950/30 border border-emerald-900/50 rounded-xl flex justify-between items-center text-sm">
               <div>
@@ -198,7 +213,6 @@ export default function MovimentarEstoquePage() {
               </button>
             </div>
           )}
-
           <div className="space-y-1.5">
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
               TIPO DE MOVIMENTAÇÃO
@@ -239,7 +253,6 @@ export default function MovimentarEstoquePage() {
               </button>
             </div>
           </div>
-
           <div className="space-y-1.5">
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
               QUANTIDADE
@@ -253,7 +266,37 @@ export default function MovimentarEstoquePage() {
               className="w-full p-3 border border-slate-700 rounded-xl bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
             />
           </div>
-
+          {ehVelcro && (
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                UNIDADE DO VELCRO
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setUnidadeVelcro('pares')}
+                  className={`py-2.5 text-xs font-bold rounded-xl border transition-all cursor-pointer ${
+                    unidadeVelcro === 'pares'
+                      ? 'bg-blue-600 text-white border-blue-500 shadow-lg shadow-blue-950'
+                      : 'bg-slate-950 text-slate-400 border-slate-800 hover:bg-slate-800'
+                  }`}
+                >
+                  Pares
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUnidadeVelcro('pacotes')}
+                  className={`py-2.5 text-xs font-bold rounded-xl border transition-all cursor-pointer ${
+                    unidadeVelcro === 'pacotes'
+                      ? 'bg-blue-600 text-white border-blue-500 shadow-lg shadow-blue-950'
+                      : 'bg-slate-950 text-slate-400 border-slate-800 hover:bg-slate-800'
+                  }`}
+                >
+                  Pacotes (1 = {PROPORCAO_VELCRO_PAR_PACOTE} pares)
+                </button>
+              </div>
+            </div>
+          )}
           <div className="space-y-1.5">
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
               OBSERVAÇÃO (OPCIONAL)
@@ -266,7 +309,6 @@ export default function MovimentarEstoquePage() {
               className="w-full p-3 border border-slate-700 rounded-xl bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
             />
           </div>
-
           <div className="pt-2">
             <button
               type="submit"
@@ -277,7 +319,6 @@ export default function MovimentarEstoquePage() {
             </button>
           </div>
         </form>
-
       </div>
     </div>
   );
