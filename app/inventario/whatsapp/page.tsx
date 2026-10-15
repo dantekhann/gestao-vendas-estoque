@@ -1,14 +1,28 @@
 'use client'
-
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { parsearInventario, type ItemProcessado } from '@/lib/parser-inventario'
-
 interface Produto {
   id: string;
   nome: string;
   estoque_atual: number;
+}
+
+// Calcula a diferença (contado − estoque atual) para a coluna da pré-visualização
+function calcularDiferenca(item: ItemProcessado, produtos: Produto[]) {
+  if (!item.encontrado || !item.produto_id) {
+    return { texto: `+${item.quantidade_contada}`, classe: 'text-amber-400', sub: 'novo item' };
+  }
+  const produto = produtos.find((p) => p.id === item.produto_id);
+  const tinha = produto?.estoque_atual ?? 0;
+  const dif = item.quantidade_contada - tinha;
+  if (dif === 0) {
+    return { texto: '±0', classe: 'text-slate-500', sub: `tinha ${tinha}` };
+  }
+  const sinal = dif > 0 ? '+' : '−';
+  const classe = dif > 0 ? 'text-emerald-400' : 'text-red-400';
+  return { texto: `${sinal}${Math.abs(dif)}`, classe, sub: `tinha ${tinha}` };
 }
 
 export default function InventarioWhatsAppPage() {
@@ -20,7 +34,6 @@ export default function InventarioWhatsAppPage() {
   const [carregando, setCarregando] = useState<boolean>(false);
   const [salvando, setSalvando] = useState<boolean>(false);
   const [erro, setErro] = useState<string | null>(null);
-
   useEffect(() => {
     async function carregarProdutos() {
       try {
@@ -41,7 +54,6 @@ export default function InventarioWhatsAppPage() {
     }
     carregarProdutos();
   }, [supabase]);
-
   const processarTexto = () => {
     if (!textoWhatsApp.trim()) {
       alert('Cole o texto da lista do WhatsApp primeiro.');
@@ -49,39 +61,33 @@ export default function InventarioWhatsAppPage() {
     }
     setItensProcessados(parsearInventario(textoWhatsApp, produtos));
   };
-
   const aplicarInventario = async () => {
-  if (itensProcessados.length === 0) return;
-  try {
-    setSalvando(true);
-    setErro(null);
-
-    const payload = itensProcessados.map((item) => ({
-      produto_id: item.produto_id ?? null,
-      nomeCatalogo: item.nomeCatalogo,
-      quantidade_contada: Math.round(item.quantidade_contada),
-    }));
-
-    const { data, error } = await supabase.rpc('aplicar_inventario', {
-      itens: payload,
-    });
-
-    if (error) throw error;
-
-    const criados = (data ?? []).filter((r: any) => r.criado).length;
-    alert(`Inventário aplicado com sucesso! (${itensProcessados.length - criados} atualizados, ${criados} criados)`);
-    router.push('/produtos');
-    router.refresh();
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error('Erro ao aplicar inventário:', msg);
-    setErro(msg);
-    alert(`Erro ao aplicar inventário: ${msg}`);
-  } finally {
-    setSalvando(false);
-  }
-};
-
+    if (itensProcessados.length === 0) return;
+    try {
+      setSalvando(true);
+      setErro(null);
+      const payload = itensProcessados.map((item) => ({
+        produto_id: item.produto_id ?? null,
+        nomeCatalogo: item.nomeCatalogo,
+        quantidade_contada: Math.round(item.quantidade_contada),
+      }));
+      const { data, error } = await supabase.rpc('aplicar_inventario', {
+        itens: payload,
+      });
+      if (error) throw error;
+      const criados = (data ?? []).filter((r: any) => r.criado).length;
+      alert(`Inventário aplicado com sucesso! (${itensProcessados.length - criados} atualizados, ${criados} criados)`);
+      router.push('/produtos');
+      router.refresh();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('Erro ao aplicar inventário:', msg);
+      setErro(msg);
+      alert(`Erro ao aplicar inventário: ${msg}`);
+    } finally {
+      setSalvando(false);
+    }
+  };
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-3xl mx-auto space-y-6">
@@ -98,13 +104,11 @@ export default function InventarioWhatsAppPage() {
             ← Voltar
           </button>
         </div>
-
         {erro && (
           <div className="p-4 border border-red-500/30 bg-red-950/50 text-red-400 rounded-lg text-sm">
             {erro}
           </div>
         )}
-
         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-4">
           <label className="block text-xs font-semibold tracking-wider text-slate-400 uppercase">
             Cole a lista completa do WhatsApp aqui:
@@ -125,7 +129,6 @@ export default function InventarioWhatsAppPage() {
             {carregando ? 'A carregar...' : '🔍 Processar e Normalizar Lista'}
           </button>
         </div>
-
         {itensProcessados.length > 0 && (
           <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-4">
             <h2 className="text-xs font-semibold tracking-wider text-slate-400 uppercase">
@@ -138,21 +141,29 @@ export default function InventarioWhatsAppPage() {
                     <th className="p-3">Texto Original (WhatsApp)</th>
                     <th className="p-3">Nome Normalizado no Sistema</th>
                     <th className="p-3 text-center">Contagem Consolidada</th>
+                    <th className="p-3 text-center">Diferença</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
-                  {itensProcessados.map((item, idx) => (
-                    <tr key={idx} className="hover:bg-slate-800/50">
-                      <td className="p-3 text-slate-400 text-xs">{item.nomeOriginal}</td>
-                      <td className="p-3 font-medium text-slate-200">
-                        {item.nomeCatalogo}
-                        {!item.encontrado && (
-                          <span className="block text-xs text-amber-400">Novo item criado automaticamente</span>
-                        )}
-                      </td>
-                      <td className="p-3 text-center font-bold text-emerald-400">{item.quantidade_contada}</td>
-                    </tr>
-                  ))}
+                  {itensProcessados.map((item, idx) => {
+                    const dif = calcularDiferenca(item, produtos);
+                    return (
+                      <tr key={idx} className="hover:bg-slate-800/50">
+                        <td className="p-3 text-slate-400 text-xs">{item.nomeOriginal}</td>
+                        <td className="p-3 font-medium text-slate-200">
+                          {item.nomeCatalogo}
+                          {!item.encontrado && (
+                            <span className="block text-xs text-amber-400">Novo item criado automaticamente</span>
+                          )}
+                        </td>
+                        <td className="p-3 text-center font-bold text-emerald-400">{item.quantidade_contada}</td>
+                        <td className="p-3 text-center">
+                          <span className={`font-bold ${dif.classe}`}>{dif.texto}</span>
+                          <span className="block text-xs text-slate-500">{dif.sub}</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
