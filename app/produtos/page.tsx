@@ -1,11 +1,12 @@
 'use client'
 
-import React from 'react'                                    // resolve os 3 erros "React UMD"
+import BotaoProduzir from './BotaoProduzir';
+import React from 'react'
 import { useState, useEffect, useRef, useCallback } from 'react'
-import Link from 'next/link'                                 // resolve os 4 erros "Link"
-import { z } from 'zod'                                      // resolve os 9 erros "z"
+import Link from 'next/link'
+import { z } from 'zod'
 import { createClient } from '@/lib/supabase/client'
-import { formatarData } from '@/lib/formatters'              // resolve os 4 erros "formatarData"
+import { formatarData } from '@/lib/formatters'
 
 // Esquema de validação com Zod
 const produtoSchema = z.object({
@@ -469,12 +470,13 @@ export default function ProdutosAdminPage() {
     <div className="min-h-screen bg-slate-950 text-slate-100 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-6xl mx-auto space-y-6">
         
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900 p-5 rounded-xl border border-slate-800 shadow-md">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900 p-5 rounded-xl border border-slate-800 shadow-md">
           <div>
             <h1 className="text-2xl font-bold text-white">Gestão de Produtos e Prazos</h1>
             <p className="text-sm text-slate-400">Controlo rigoroso e logístico - OrC Brasil</p>
           </div>
           <div className="flex gap-2">
+            <BotaoProduzir />
             <Link href="/inventario/whatsapp" className="px-4 py-2 text-sm font-medium bg-blue-600 text-white hover:bg-blue-500 rounded-lg shadow-sm transition-colors">
               📱 Inventário WhatsApp
             </Link>
@@ -483,7 +485,6 @@ export default function ProdutosAdminPage() {
             </Link>
           </div>
         </div>
-
         {totalEmAlerta > 0 && (
           <div className="bg-amber-950/35 border border-amber-600/40 rounded-xl p-5 shadow-lg space-y-4">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
