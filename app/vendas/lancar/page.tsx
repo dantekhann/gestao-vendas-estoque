@@ -280,6 +280,12 @@ async function extrairTextoDoPdf(arquivo: File): Promise<string> {
     "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
   const dados = await arquivo.arrayBuffer();
+  // Worker do pdfjs na thread principal — imune a caminho/404, compatível com Turbopack
+const globalWorker = globalThis as unknown as { pdfjsWorker?: unknown };
+if (!globalWorker.pdfjsWorker) {
+  // @ts-expect-error — o módulo do worker não tem declarações de tipo
+  globalWorker.pdfjsWorker = await import('pdfjs-dist/build/pdf.worker.mjs');
+}
   const doc = await pdfjs.getDocument({ data: new Uint8Array(dados) }).promise;
   let texto = "";
   for (let i = 1; i <= doc.numPages; i++) {
