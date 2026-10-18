@@ -1,8 +1,10 @@
-import './globals.css';
+import "./globals.css";
+
+import Navegacao from "@/components/navegacao";
 
 export const metadata = {
-  title: 'OrC Brasil - Gestão de Vendas e Estoque',
-  description: 'Sistema de gestão integrado para OrC Brasil',
+  title: "OrC Brasil - Gestão de Vendas e Estoque",
+  description: "Sistema de gestão integrado para OrC Brasil",
 };
 
 export default function RootLayout({
@@ -13,6 +15,7 @@ export default function RootLayout({
   return (
     <html lang="pt-BR">
       <body className="bg-slate-950 text-slate-100 antialiased min-h-screen">
+        <Navegacao />
         {children}
       </body>
     </html>
