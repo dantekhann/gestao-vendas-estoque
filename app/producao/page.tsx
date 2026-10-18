@@ -8,6 +8,7 @@ import {
   atualizarMetaProducao,
   type MetaProducao,
 } from "@/lib/producao";
+import { buscarDadosRelatorio, montarMensagemRelatorio } from "@/lib/relatorio";
 
 type Mensagem = { tipo: "ok" | "info" | "erro"; texto: string } | null;
 
@@ -19,6 +20,7 @@ export default function ProducaoPage() {
   const [valores, setValores] = useState<Record<string, string>>({});
   const [carregando, setCarregando] = useState(true);
   const [salvandoId, setSalvandoId] = useState<string | null>(null);
+  const [gerandoRelatorio, setGerandoRelatorio] = useState(false);
   const [mensagem, setMensagem] = useState<Mensagem>(null);
 
   useEffect(() => {
@@ -57,6 +59,23 @@ export default function ProducaoPage() {
   useEffect(() => {
     if (!carregando) void carregar();
   }, [carregando, carregar]);
+
+  async function enviarRelatorioWhatsApp() {
+    setGerandoRelatorio(true);
+    setMensagem(null);
+    try {
+      const dados = await buscarDadosRelatorio();
+      const texto = montarMensagemRelatorio(dados);
+      window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, "_blank");
+    } catch (err) {
+      setMensagem({
+        tipo: "erro",
+        texto: `Erro ao gerar relatório: ${err instanceof Error ? err.message : "desconhecido"}`,
+      });
+    } finally {
+      setGerandoRelatorio(false);
+    }
+  }
 
   async function salvar(meta: MetaProducao) {
     const bruto = (valores[meta.id] ?? "").trim();
@@ -111,6 +130,16 @@ export default function ProducaoPage() {
           <strong className="text-slate-200">aumenta</strong>, só a meta é
           atualizada.
         </p>
+
+        <button
+          onClick={() => void enviarRelatorioWhatsApp()}
+          disabled={gerandoRelatorio}
+          className="mt-4 w-full rounded-lg bg-green-600 px-4 py-3 font-semibold text-white transition-colors hover:bg-green-500 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {gerandoRelatorio
+            ? "Gerando relatório…"
+            : "📱 Enviar relatório por WhatsApp"}
+        </button>
       </header>
 
       {mensagem && (
