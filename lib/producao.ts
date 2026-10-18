@@ -23,11 +23,17 @@ export async function listarMetasProducao(): Promise<MetaProducao[]> {
 
   return (data ?? [])
     .map((linha) => {
-      const produtos = linha.produtos as { nome: string } | null;
+      // O Supabase pode devolver o produto relacionado como objeto OU lista.
+      // Aceitamos os dois formatos e extraímos o nome.
+      const relacionamento = linha.produtos as unknown;
+      const produto = Array.isArray(relacionamento)
+        ? (relacionamento[0] as { nome?: string } | undefined)
+        : (relacionamento as { nome?: string } | null);
+
       return {
         id: linha.id as string,
         produto_id: linha.produto_id as string,
-        nome_produto: produtos?.nome ?? 'Produto',
+        nome_produto: produto?.nome ?? 'Produto',
         quantidade_alvo: Number(linha.quantidade_alvo) || 0,
         atualizado_em: linha.atualizado_em as string,
       };
