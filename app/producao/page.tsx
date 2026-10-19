@@ -157,43 +157,60 @@ export default function ProducaoPage() {
       )}
 
       <section className="space-y-4">
-        {metas.map((meta) => (
-          <div
-            key={meta.id}
-            className="rounded-xl border border-slate-800 bg-slate-900 p-5 shadow-lg"
-          >
-            <h2 className="text-sm font-medium text-slate-400">
-              {meta.nome_produto}
-            </h2>
-            <p className="mt-1 text-4xl font-bold tracking-tight text-amber-400">
-              {meta.quantidade_alvo.toLocaleString("pt-BR")}
-            </p>
-            <p className="mt-1 text-xs text-slate-500">
-              precisa produzir • atualizado em{" "}
-              {new Date(meta.atualizado_em).toLocaleString("pt-BR")}
-            </p>
+        {metas.map((meta) => {
+          const abaixoDoMinimo =
+            meta.estoque_minimo !== null &&
+            meta.estoque_minimo > 0 &&
+            meta.estoque_atual < meta.estoque_minimo;
 
-            <div className="mt-4 flex gap-2">
-              <input
-                type="text"
-                inputMode="numeric"
-                value={valores[meta.id] ?? ""}
-                onChange={(e) =>
-                  setValores((v) => ({ ...v, [meta.id]: e.target.value }))
-                }
-                className="w-32 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-100 placeholder-slate-500 focus:border-amber-500 focus:outline-none"
-                placeholder="Novo nº"
-              />
-              <button
-                onClick={() => salvar(meta)}
-                disabled={salvandoId === meta.id}
-                className="rounded-lg bg-amber-600 px-4 py-2 font-semibold text-white transition-colors hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-50"
+          return (
+            <div
+              key={meta.id}
+              className="rounded-xl border border-slate-800 bg-slate-900 p-5 shadow-lg"
+            >
+              <h2 className="text-sm font-medium text-slate-400">
+                {meta.nome_produto}
+              </h2>
+              <p className="mt-1 text-4xl font-bold tracking-tight text-amber-400">
+                {meta.quantidade_alvo.toLocaleString("pt-BR")}
+              </p>
+              <p
+                className={`mt-2 text-xs font-semibold ${
+                  abaixoDoMinimo ? "text-amber-400" : "text-emerald-400"
+                }`}
               >
-                {salvandoId === meta.id ? "Salvando…" : "Atualizar"}
-              </button>
+                {abaixoDoMinimo ? "⚠️ " : "✓ "}
+                estoque: {meta.estoque_atual.toLocaleString("pt-BR")}
+                {meta.estoque_minimo !== null &&
+                  ` • mínimo: ${meta.estoque_minimo.toLocaleString("pt-BR")}`}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                precisa produzir • atualizado em{" "}
+                {new Date(meta.atualizado_em).toLocaleString("pt-BR")}
+              </p>
+
+              <div className="mt-4 flex gap-2">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={valores[meta.id] ?? ""}
+                  onChange={(e) =>
+                    setValores((v) => ({ ...v, [meta.id]: e.target.value }))
+                  }
+                  className="w-32 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-100 placeholder-slate-500 focus:border-amber-500 focus:outline-none"
+                  placeholder="Novo nº"
+                />
+                <button
+                  onClick={() => salvar(meta)}
+                  disabled={salvandoId === meta.id}
+                  className="rounded-lg bg-amber-600 px-4 py-2 font-semibold text-white transition-colors hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {salvandoId === meta.id ? "Salvando…" : "Atualizar"}
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </section>
     </main>
   );
