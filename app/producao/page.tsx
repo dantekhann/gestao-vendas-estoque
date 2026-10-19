@@ -9,6 +9,7 @@ import {
   type MetaProducao,
 } from "@/lib/producao";
 import { buscarDadosRelatorio, montarMensagemRelatorio } from "@/lib/relatorio";
+import HistoricoProducao from "./historico";
 
 type Mensagem = { tipo: "ok" | "info" | "erro"; texto: string } | null;
 
@@ -211,7 +212,9 @@ export default function ProducaoPage() {
             </div>
           );
         })}
-      </section>
+</section>
+
+      <HistoricoProducao />
     </main>
   );
 }
