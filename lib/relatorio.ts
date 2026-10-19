@@ -7,10 +7,17 @@ export interface LinhaRelatorio {
   minimo?: number | null;
 }
 
+export interface DiaHistorico {
+  chave: string;
+  data: string;
+  total: number;
+}
+
 export interface DadosRelatorio {
   faltaProduzir: LinhaRelatorio[];
   producaoHoje: LinhaRelatorio[];
   estoqueAtual: LinhaRelatorio[];
+  historicoSemana: DiaHistorico[];
 }
 
 // Ordem fixa dos grupos — produtos para venda primeiro
@@ -252,7 +259,43 @@ export async function buscarDadosRelatorio(): Promise<DadosRelatorio> {
     }))
     .sort((a, b) => a.nome.localeCompare(b.nome));
 
-  return { faltaProduzir, producaoHoje, estoqueAtual };
+    // Histórico: produção dos últimos 7 dias (mesmas regras do relatório)
+  const seteDiasAtras = new Date();
+  seteDiasAtras.setDate(seteDiasAtras.getDate() - 6);
+  seteDiasAtras.setHours(0, 0, 0, 0);
+
+  const totaisPorDia = new Map<string, number>();
+  for (const mov of (movimentacoes ?? []) as Record<string, unknown>[]) {
+    const data = extrairData(mov);
+    if (!data || data < seteDiasAtras) continue;
+
+    const tipo = extrairTipo(mov);
+    if (!tipo.includes('ENTRADA')) continue;
+
+    const id = String(mov.produto_id);
+    if (!idsComMeta.has(id)) continue;
+
+    const obs = String(mov.observacao ?? mov.observacoes ?? '').toLowerCase();
+    if (obs.includes('estorno')) continue;
+
+    const qtd = extrairQuantidade(mov);
+    const chave = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}-${String(data.getDate()).padStart(2, '0')}`;
+    totaisPorDia.set(chave, (totaisPorDia.get(chave) ?? 0) + qtd);
+  }
+
+  const historicoSemana: DiaHistorico[] = [...totaisPorDia.entries()]
+    .map(([chave, total]) => {
+      const [ano, mes, dia] = chave.split('-').map(Number);
+      const dataLegivel = new Date(ano, mes - 1, dia).toLocaleDateString('pt-BR', {
+        weekday: 'short',
+        day: '2-digit',
+        month: '2-digit',
+      });
+      return { chave, data: dataLegivel, total };
+    })
+    .sort((a, b) => b.chave.localeCompare(a.chave));
+
+  return { faltaProduzir, producaoHoje, estoqueAtual, historicoSemana };
 }
 
 function linhasPorCategoria(linhas: LinhaRelatorio[]): string {
@@ -318,6 +361,18 @@ export function montarMensagemRelatorio(dados: DadosRelatorio): string {
               (l) => `• ${l.nome}: ${l.quantidade.toLocaleString("pt-BR")} un.`,
             )
             .join("\n")),
+  );
+    const totalSemana = dados.historicoSemana.reduce((s, d) => s + d.total, 0);
+  partes.push(
+    '📅 *Produção — últimos 7 dias*\n' +
+      (dados.historicoSemana.length === 0
+        ? '• Nenhuma produção na semana'
+        : dados.historicoSemana
+            .map((d) => `• ${d.data}: ${d.total.toLocaleString('pt-BR')} un.`)
+            .join('\n')) +
+      (totalSemana > 0
+        ? `\n*Total da semana: ${totalSemana.toLocaleString('pt-BR')} un.*`
+        : '')
   );
 
   const estoqueTexto = linhasPorCategoria(dados.estoqueAtual);
