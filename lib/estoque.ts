@@ -1,22 +1,22 @@
-import { supabase } from '@/lib/supabase'
-export type TipoMovimentacao = 'ENTRADA' | 'SAIDA' | 'AJUSTE' | 'VENDA';
+import { supabase } from "@/lib/supabase";
+export type TipoMovimentacao = "ENTRADA" | "SAIDA" | "AJUSTE" | "VENDA";
 export const PROPORCAO_VELCRO_PAR_PACOTE = 504;
 
 // ============================================================
 // CAIXAS DE DISPLAY: 1 caixa descontada por display produzido
 // ============================================================
 const CAIXA_POR_DISPLAY: Record<string, string> = {
-  'display yerba': 'Caixas Yerba',
-  'display yerbinha': 'Caixas Yerbinha',
+  "display yerba": "Caixas Yerba",
+  "display yerbinha": "Caixas Yerbinha",
 };
 
 export async function descontarCaixaDoDisplay(
   nomeDisplay: string,
-  quantidadeProduzida: number
+  quantidadeProduzida: number,
 ): Promise<void> {
   // Só age se o produto for um display com caixa associada
   const chave = Object.keys(CAIXA_POR_DISPLAY).find((k) =>
-    nomeDisplay.toLowerCase().includes(k)
+    nomeDisplay.toLowerCase().includes(k),
   );
   if (!chave) return;
 
@@ -25,10 +25,10 @@ export async function descontarCaixaDoDisplay(
 
   // Busca o produto da caixa (apenas ativos, igual ao padrão do velcro)
   const { data: caixas, error: erroCaixa } = await supabase
-    .from('produtos')
-    .select('id, nome, estoque_atual')
-    .ilike('nome', `%${nomeCaixa}%`)
-    .eq('ativo', true)
+    .from("produtos")
+    .select("id, nome, estoque_atual")
+    .ilike("nome", `%${nomeCaixa}%`)
+    .eq("ativo", true)
     .limit(1);
 
   if (erroCaixa) {
@@ -36,7 +36,9 @@ export async function descontarCaixaDoDisplay(
     return; // não interrompe a produção
   }
   if (!caixas || caixas.length === 0) {
-    console.warn(`Produto "${nomeCaixa}" não encontrado ou inativo — baixa de caixa ignorada.`);
+    console.warn(
+      `Produto "${nomeCaixa}" não encontrado ou inativo — baixa de caixa ignorada.`,
+    );
     return;
   }
 
@@ -44,10 +46,10 @@ export async function descontarCaixaDoDisplay(
 
   // Lança a movimentação de SAÍDA na tabela certa (gravação direta, sem efeitos em cadeia)
   const { error: erroMov } = await supabase
-    .from('movimentacoes_estoque')
+    .from("movimentacoes_estoque")
     .insert({
       produto_id: caixa.id,
-      tipo: 'SAIDA',
+      tipo: "SAIDA",
       quantidade: quantidadeCaixas,
       observacao: `Sincronização automática (Baixa de ${nomeCaixa} para ${nomeDisplay})`,
     });
@@ -60,9 +62,71 @@ export async function descontarCaixaDoDisplay(
   // Atualiza o estoque da caixa
   const novoEstoqueCaixa = (caixa.estoque_atual ?? 0) - quantidadeCaixas;
   await supabase
-    .from('produtos')
+    .from("produtos")
     .update({ estoque_atual: novoEstoqueCaixa })
-    .eq('id', caixa.id);
+    .eq("id", caixa.id);
+}
+// ============================================================
+// SINCRONIZAÇÃO DESMAROLA: 1 unidade consome 1 rótulo + 1 caixa + 1 frasco
+// ============================================================
+function extrairSaborDesmarola(nome: string): string | null {
+  const lower = nome.toLowerCase();
+  if (!lower.includes("desmarola")) return null;
+  if (lower.includes("essencia") || lower.includes("essência")) return null;
+  if (!lower.includes("unidade")) return null;
+  const m = nome.match(/-\s*(.+?)\s*\(/i);
+  return m ? m[1].trim() : null;
+}
+
+async function descontarInsumosDesmarola(
+  nomeProduto: string,
+  quantidade: number,
+): Promise<void> {
+  const sabor = extrairSaborDesmarola(nomeProduto);
+  if (!sabor) return;
+  const qtd = Math.max(1, Math.round(quantidade));
+
+  const alvos = [
+    `Rótulo Desmarola ${sabor}`,
+    `Caixa Desmarola ${sabor}`,
+    "Frascos Desmarola",
+  ];
+
+  for (const nomeAlvo of alvos) {
+    const { data: insumos, error: erroBusca } = await supabase
+      .from("produtos")
+      .select("id, nome, estoque_atual")
+      .ilike("nome", `%${nomeAlvo}%`)
+      .eq("ativo", true)
+      .limit(1);
+    if (erroBusca) {
+      console.error(`Erro ao buscar ${nomeAlvo}:`, erroBusca);
+      continue;
+    }
+    if (!insumos || insumos.length === 0) {
+      console.warn(
+        `Insumo "${nomeAlvo}" não encontrado ou inativo. Baixa ignorada.`,
+      );
+      continue;
+    }
+    const insumo = insumos[0];
+    const { error: erroMov } = await supabase
+      .from("movimentacoes_estoque")
+      .insert({
+        produto_id: insumo.id,
+        tipo: "SAIDA",
+        quantidade: qtd,
+        observacao: `Sincronização automática (Baixa de ${insumo.nome} para ${nomeProduto})`,
+      });
+    if (erroMov) {
+      console.error(`Erro ao lançar baixa de ${insumo.nome}:`, erroMov);
+      continue;
+    }
+    await supabase
+      .from("produtos")
+      .update({ estoque_atual: (insumo.estoque_atual ?? 0) - qtd })
+      .eq("id", insumo.id);
+  }
 }
 
 interface RegistarMovimentacaoParams {
@@ -86,59 +150,62 @@ export async function registarMovimentacaoEstoque({
 
     // 1. Buscar dados do produto (nome e estoque atual)
     const { data: produto, error: erroProdBusca } = await supabase
-      .from('produtos')
-      .select('id, nome, estoque_atual')
-      .eq('id', produtoId)
+      .from("produtos")
+      .select("id, nome, estoque_atual")
+      .eq("id", produtoId)
       .single();
     if (erroProdBusca) throw erroProdBusca;
 
     // 2. Inserir o registo na tabela de movimentações
-    const { error: erroMov } = await supabase.from('movimentacoes_estoque').insert([
-      {
-        produto_id: produtoId,
-        tipo,
-        quantidade,
-        observacao: observacao || null,
-      },
-    ]);
+    const { error: erroMov } = await supabase
+      .from("movimentacoes_estoque")
+      .insert([
+        {
+          produto_id: produtoId,
+          tipo,
+          quantidade,
+          observacao: observacao || null,
+        },
+      ]);
     if (erroMov) throw erroMov;
 
     // 3. Buscar o estoque atual e calcular o novo valor
     const estoqueAtual = Number(produto?.estoque_atual) || 0;
     let novoEstoque = estoqueAtual;
-    if (tipo === 'ENTRADA') {
+    if (tipo === "ENTRADA") {
       novoEstoque = estoqueAtual + quantidade;
-    } else if (tipo === 'SAIDA' || tipo === 'VENDA') {
+    } else if (tipo === "SAIDA" || tipo === "VENDA") {
       novoEstoque = Math.max(0, estoqueAtual - quantidade);
-    } else if (tipo === 'AJUSTE') {
+    } else if (tipo === "AJUSTE") {
       novoEstoque = quantidade;
     }
 
     // 4. Atualizar o estoque na tabela de produtos
     const { error: erroProdUpdate } = await supabase
-      .from('produtos')
+      .from("produtos")
       .update({ estoque_atual: novoEstoque })
-      .eq('id', produtoId);
+      .eq("id", produtoId);
     if (erroProdUpdate) throw erroProdUpdate;
 
     // 5. Sincronização Automática de Velcro com conversão numérica blindada
     if (sincronizarVelcro && produto?.nome) {
       const nomeLower = produto.nome.toLowerCase();
-      if (nomeLower.includes('velcro')) {
-        const ePacote = nomeLower.includes('pacote') || nomeLower.includes('pacotes');
+      if (nomeLower.includes("velcro")) {
+        const ePacote =
+          nomeLower.includes("pacote") || nomeLower.includes("pacotes");
         const { data: parceiros, error: erroParceiro } = await supabase
-          .from('produtos')
-          .select('id, nome')
-          .eq('ativo', true)
-          .neq('id', produtoId);
+          .from("produtos")
+          .select("id, nome")
+          .eq("ativo", true)
+          .neq("id", produtoId);
         if (!erroParceiro && parceiros) {
           const produtoParceiro = parceiros.find((p) => {
             const pNome = p.nome.toLowerCase();
-            if (!pNome.includes('velcro')) return false;
+            if (!pNome.includes("velcro")) return false;
             if (ePacote) {
-              return pNome.includes('par') || pNome.includes('pares');
+              return pNome.includes("par") || pNome.includes("pares");
             } else {
-              return pNome.includes('pacote') || pNome.includes('pacotes');
+              return pNome.includes("pacote") || pNome.includes("pacotes");
             }
           });
           if (produtoParceiro) {
@@ -149,7 +216,7 @@ export async function registarMovimentacaoEstoque({
               produtoId: produtoParceiro.id,
               tipo,
               quantidade: quantidadeConvertida,
-              observacao: `Sincronização automática de Velcro (${ePacote ? 'Pacotes ➔ Pares' : 'Pares ➔ Pacotes'})`,
+              observacao: `Sincronização automática de Velcro (${ePacote ? "Pacotes ➔ Pares" : "Pares ➔ Pacotes"})`,
               sincronizarVelcro: false, // Previne loop infinito
             });
           }
@@ -157,15 +224,18 @@ export async function registarMovimentacaoEstoque({
       }
     }
 
-    // 6. Baixa automática de caixa na produção de Display Yerba / Yerbinha
-    if (tipo === 'ENTRADA' && produto?.nome) {
-      await descontarCaixaDoDisplay(produto.nome, quantidade);
+    // 6. Sincronização Desmarola: 1 unidade = 1 rótulo + 1 caixa + 1 frasco
+    if (tipo === "ENTRADA" && produto?.nome) {
+      await descontarInsumosDesmarola(produto.nome, quantidade);
     }
 
     return { success: true, novoEstoque };
   } catch (err: unknown) {
     const errorObj = err as { message?: string };
-    console.error('Erro ao registar movimentação de estoque:', errorObj?.message);
+    console.error(
+      "Erro ao registar movimentação de estoque:",
+      errorObj?.message,
+    );
     throw err;
   }
 }
@@ -176,7 +246,7 @@ export const movimentarEstoque = registarMovimentacaoEstoque;
 // ==========================================
 // LÓGICA DE CONVERSÃO E LANÇAMENTO DE VELCRO (MANUAL)
 // ==========================================
-export type UnidadeVelcro = 'pares' | 'pacotes';
+export type UnidadeVelcro = "pares" | "pacotes";
 interface ParametrosVelcro {
   produtoIdOrigem: string;
   produtoIdParceiro?: string;
@@ -188,22 +258,22 @@ interface ParametrosVelcro {
 }
 
 export function ehVelcro(nome: string): boolean {
-  return nome.toLowerCase().includes('velcro');
+  return nome.toLowerCase().includes("velcro");
 }
 
 export function encontrarParceiroVelcro<T extends { id: string; nome: string }>(
   produto: { id: string; nome: string },
-  catalogo: T[]
+  catalogo: T[],
 ): { parceiro: T | undefined; unidadeOrigem: UnidadeVelcro } {
-  const ePacote = produto.nome.toLowerCase().includes('pacote');
-  const termoParceiro = ePacote ? 'par' : 'pacote';
+  const ePacote = produto.nome.toLowerCase().includes("pacote");
+  const termoParceiro = ePacote ? "par" : "pacote";
   const parceiro = catalogo.find(
     (p) =>
       p.id !== produto.id &&
       ehVelcro(p.nome) &&
-      p.nome.toLowerCase().includes(termoParceiro)
+      p.nome.toLowerCase().includes(termoParceiro),
   );
-  return { parceiro, unidadeOrigem: ePacote ? 'pacotes' : 'pares' };
+  return { parceiro, unidadeOrigem: ePacote ? "pacotes" : "pares" };
 }
 
 export async function processarLancamentoVelcro({
@@ -217,7 +287,7 @@ export async function processarLancamentoVelcro({
   try {
     const qtdNum = Number(quantidade) || 0;
     let qtdConvertida = 0;
-    if (unidadeOrigem === 'pares') {
+    if (unidadeOrigem === "pares") {
       qtdConvertida = qtdNum / PROPORCAO_VELCRO_PAR_PACOTE;
     } else {
       qtdConvertida = qtdNum * PROPORCAO_VELCRO_PAR_PACOTE;
@@ -227,18 +297,18 @@ export async function processarLancamentoVelcro({
         produtoId: produtoIdOrigem,
         tipo,
         quantidade: qtdNum,
-        observacao: `${observacao || 'Lançamento de velcro'} (${unidadeOrigem})`,
+        observacao: `${observacao || "Lançamento de velcro"} (${unidadeOrigem})`,
         sincronizarVelcro: true,
       });
     }
     return {
       success: true,
       quantidadeOriginal: qtdNum,
-      quantidadeConvertida: qtdConvertida
+      quantidadeConvertida: qtdConvertida,
     };
   } catch (err: unknown) {
     const errorObj = err as { message?: string };
-    console.error('Erro ao processar lançamento de velcro:', errorObj?.message);
+    console.error("Erro ao processar lançamento de velcro:", errorObj?.message);
     throw err;
   }
 }
