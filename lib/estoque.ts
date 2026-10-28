@@ -184,6 +184,7 @@ interface RegistrarMovimentacaoParams {
   quantidade: number;
   observacao?: string;
   sincronizarVelcro?: boolean;
+  sincronizarCaixa?: boolean;
 }
 
 export async function registrarMovimentacaoEstoque({
@@ -192,6 +193,7 @@ export async function registrarMovimentacaoEstoque({
   quantidade,
   observacao,
   sincronizarVelcro = true,
+  sincronizarCaixa = true,
 }: RegistrarMovimentacaoParams) {
   try {
     // 1. Buscar dados do produto (nome e estoque atual)
@@ -274,7 +276,7 @@ export async function registrarMovimentacaoEstoque({
       await descontarInsumosBolados(produto.nome, quantidade);
     }
     // 8. Baixa de caixa para displays Yerba/Yerbinha
-    if (tipo === "ENTRADA" && produto?.nome) {
+    if (tipo === "ENTRADA" && produto?.nome && sincronizarCaixa !== false) {
       await descontarCaixaDoDisplay(produto.nome, quantidade);
     }
     return { success: true, novoEstoque };

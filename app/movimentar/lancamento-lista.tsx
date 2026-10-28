@@ -15,7 +15,15 @@ function normalizar(s: string): string {
     .replace(/\s+/g, " ")
     .trim();
 }
-
+// Mapa de redirecionamento: apelido da lista → produto correto do cadastro
+const MAPA_ALIAS: Record<string, string> = {
+  "cxs yerba": "display yerba",
+  "caixa yerba": "display yerba",
+  "caixas yerba": "display yerba",
+  "cxs yerbinha": "display yerbinha",
+  "caixa yerbinha": "display yerbinha",
+  "caixas yerbinha": "display yerbinha",
+};
 interface LinhaInterpretada {
   original: string;
   alias: string;
@@ -64,17 +72,18 @@ function interpretarLista(
     const alias = (mFmt1 ? m[1] : m[2]).trim();
     const quantidade =
       Math.round(Number((mFmt1 ? m[2] : m[1]).replace(/[.,]/g, ""))) || 0;
-    const termos = alias.split(/\s+/).filter((t) => t.length > 1);
-
+    // Redireciona apelidos conhecidos (ex.: caixas da lista → Display)
+    const aliasFinal = MAPA_ALIAS[normalizar(alias)] ?? alias;
+    const termos = aliasFinal.split(/\s+/).filter((t) => t.length > 1);
     // Tipo citado no apelido trava a busca: rot → Rótulo, caixa → Caixa,
     // frasco → Frasco, essência → Essência
-    const tipoPreferido = /(^|\s)rot/.test(alias)
+    const tipoPreferido = /(^|\s)rot/.test(aliasFinal)
       ? "rotulo"
-      : /(^|\s)caixa/.test(alias)
+      : /(^|\s)caixa/.test(aliasFinal)
         ? "caixa"
-        : /(^|\s)frasco/.test(alias)
+        : /(^|\s)frasco/.test(aliasFinal)
           ? "frasco"
-          : alias.includes("essencia")
+          : aliasFinal.includes("essencia")
             ? "essencia"
             : null;
 
@@ -208,6 +217,7 @@ export default function LancamentoLista() {
           quantidade: l.quantidade,
           observacao: `[Data: ${dataHoje}] Entrada por colagem de lista: "${l.original}"`,
           sincronizarVelcro: false,
+          sincronizarCaixa: false,
         });
         okIdx.push(i);
       } catch (err: unknown) {
