@@ -19,52 +19,118 @@ export interface ItemProcessado {
 
 // ── Dicionário de acentos (não consolidado cai no formato canônico) ──
 const DICIONARIO_ACENTOS: Record<string, string> = {
-  limao: 'Limão', capim: 'Capim', cravo: 'Cravo', lavanda: 'Lavanda',
-  hortela: 'Hortelã', alecrim: 'Alecrim', canela: 'Canela', anis: 'Anis',
-  erva: 'Erva', cidreira: 'Cidreira', melissa: 'Melissa', eucalipto: 'Eucalipto',
-  chocolate: 'Chocolate', morango: 'Morango', baunilha: 'Baunilha',
+  limao: "Limão",
+  capim: "Capim",
+  cravo: "Cravo",
+  lavanda: "Lavanda",
+  hortela: "Hortelã",
+  alecrim: "Alecrim",
+  canela: "Canela",
+  anis: "Anis",
+  erva: "Erva",
+  cidreira: "Cidreira",
+  melissa: "Melissa",
+  eucalipto: "Eucalipto",
+  chocolate: "Chocolate",
+  morango: "Morango",
+  baunilha: "Baunilha",
 };
 
 const STOPWORDS = new Set([
-  'de', 'da', 'do', 'dos', 'das', 'a', 'o', 'e', 'para', 'com',
-  'ml', 'l', 'litro', 'litros', 'g', 'gramas', 'kg', 'mililitros',
-  'un', 'unidade', 'unidades', 'pares', 'par', 'pacote', 'pacotes',
-  'pct', 'cx', 'caixa', 'caixas',
+  "de",
+  "da",
+  "do",
+  "dos",
+  "das",
+  "a",
+  "o",
+  "e",
+  "para",
+  "com",
+  "ml",
+  "l",
+  "litro",
+  "litros",
+  "g",
+  "gramas",
+  "kg",
+  "mililitros",
+  "un",
+  "unidade",
+  "unidades",
+  "pares",
+  "par",
+  "pacote",
+  "pacotes",
+  "pct",
+  "cx",
+  "caixa",
+  "caixas",
 ]);
 
 const SINONIMOS: Record<string, string> = {
-  emb: 'embalagem', embalagens: 'embalagem',
-  displays: 'display', masters: 'master',
+  emb: "embalagem",
+  embalagens: "embalagem",
+  displays: "display",
+  masters: "master",
+  rot: "rotulo",
+  rotulo: "rotulo",
+  rotulos: "rotulo",
 };
 
-const QUALIFICADORES = new Set(['embalagem', 'master', 'display']);
+const QUALIFICADORES = new Set(["embalagem", "master", "display"]);
 
-const CONECTIVOS = new Set(['de', 'da', 'do', 'dos', 'das', 'e', 'em', 'com', 'para']);
+const CONECTIVOS = new Set([
+  "de",
+  "da",
+  "do",
+  "dos",
+  "das",
+  "e",
+  "em",
+  "com",
+  "para",
+]);
 
 const UNIDADES = new Set([
-  'pct', 'un', 'cx', 'emb', 'ml', 'l', 'kg', 'g',
-  'pacote', 'pacotes', 'caixa', 'caixas', 'embalagem', 'embalagens',
-  'litro', 'litros', 'gramas', 'mililitros',
+  "pct",
+  "un",
+  "cx",
+  "emb",
+  "ml",
+  "l",
+  "kg",
+  "g",
+  "pacote",
+  "pacotes",
+  "caixa",
+  "caixas",
+  "embalagem",
+  "embalagens",
+  "litro",
+  "litros",
+  "gramas",
+  "mililitros",
 ]);
 
 function normalizar(s: string): string {
   return s
     .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/\([^)]*\)/g, ' ') // remove (mL), (pares), (%)
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\([^)]*\)/g, " ") // remove (mL), (pares), (%)
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
 function limparUnidade(t: string): string {
-  return t.toLowerCase().replace(/\./g, '');
+  return t.toLowerCase().replace(/\./g, "");
 }
 
 function tokensDe(texto: string): string[] {
   return normalizar(texto)
-    .split(' ')
+    .split(" ")
     .filter(Boolean)
     .filter((t) => !STOPWORDS.has(t))
     .map((t) => SINONIMOS[t] ?? t);
@@ -78,16 +144,16 @@ export function parseNumero(bruto: string): number | null {
   if (!m) return null;
 
   let num = m[0];
-  const temVirgula = num.includes(',');
-  const temPonto = num.includes('.');
+  const temVirgula = num.includes(",");
+  const temPonto = num.includes(".");
 
   if (temVirgula && temPonto) {
-    num = num.replace(/\./g, '').replace(',', '.');
+    num = num.replace(/\./g, "").replace(",", ".");
   } else if (temVirgula) {
-    num = /,\d{1,2}$/.test(num) ? num.replace(',', '.') : num.replace(/,/g, '');
+    num = /,\d{1,2}$/.test(num) ? num.replace(",", ".") : num.replace(/,/g, "");
   } else if (temPonto) {
     // "20.400" termina em .ddd = milhar; "20.4" = decimal
-    if (/(\.\d{3})+$/.test(num)) num = num.replace(/\./g, '');
+    if (/(\.\d{3})+$/.test(num)) num = num.replace(/\./g, "");
   }
 
   let valor = parseFloat(num);
@@ -101,9 +167,9 @@ export function normalizarTextoGeral(texto: string): string {
   return texto
     .trim()
     .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/\s+/g, ' ')
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
@@ -116,33 +182,37 @@ export function restaurarAcentos(texto: string): string {
       const chave = normalizar(t);
       return DICIONARIO_ACENTOS[chave] ?? t;
     })
-    .join(' ');
+    .join(" ");
 }
 
 // ── API Etapa 2: extrair quantidade do início do texto ──
-export function extrairQuantidadeComExtenso(
-  texto: string
-): { quantidade: number; textoRestante: string } {
+export function extrairQuantidadeComExtenso(texto: string): {
+  quantidade: number;
+  textoRestante: string;
+} {
   const toks = texto.trim().split(/\s+/).filter(Boolean);
-  if (toks.length === 0) return { quantidade: 0, textoRestante: '' };
+  if (toks.length === 0) return { quantidade: 0, textoRestante: "" };
 
   const primeira = limparUnidade(toks[0]);
 
-  if (primeira === 'metade') {
+  if (primeira === "metade") {
     const rest = toks.slice(1);
     if (rest.length && UNIDADES.has(limparUnidade(rest[0]))) rest.shift();
-    return { quantidade: 1, textoRestante: rest.join(' ') };
+    return { quantidade: 1, textoRestante: rest.join(" ") };
   }
 
   if (/^-?[\d.,]+$/.test(toks[0])) {
     let valor = parseNumero(toks[0]) ?? 0;
     let i = 1;
-    if (toks[i] && limparUnidade(toks[i]) === 'mil' && valor < 1000) {
+    if (toks[i] && limparUnidade(toks[i]) === "mil" && valor < 1000) {
       valor *= 1000;
       i++;
     }
     if (toks[i] && UNIDADES.has(limparUnidade(toks[i]))) i++;
-    return { quantidade: Math.round(valor), textoRestante: toks.slice(i).join(' ') };
+    return {
+      quantidade: Math.round(valor),
+      textoRestante: toks.slice(i).join(" "),
+    };
   }
 
   return { quantidade: 0, textoRestante: texto.trim() };
@@ -156,19 +226,24 @@ export function formatarTitleCase(texto: string): string {
       if (i > 0 && CONECTIVOS.has(t.toLowerCase())) return t.toLowerCase();
       return t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
     })
-    .join(' ');
+    .join(" ");
 }
 
 // ── API Etapa 2: nome oficial por apelidos ──
-export function sugerirNomeOficial(nomeOriginal: string, _nomeNormalizado: string): string {
+export function sugerirNomeOficial(
+  nomeOriginal: string,
+  _nomeNormalizado: string,
+): string {
   const t = normalizar(nomeOriginal);
 
-  if (t.includes('velcro')) return 'Velcro (pares)';
-  if (t.includes('diluente') || /\bfrasco\b/.test(t)) return 'Diluente Frasco';
+  if (t.includes("velcro")) return "Velcro (pares)";
+  if (t.includes("diluente") || /\bfrasco\b/.test(t)) return "Diluente Frasco";
 
   if (/\bessencia\b/.test(t)) {
-    const aroma = t.replace(/^.*?\bessencia\b\s*/, '').trim();
-    return 'Essência Desmarola ' + (aroma ? restaurarAcentos(aroma) : 'Desconhecida');
+    const aroma = t.replace(/^.*?\bessencia\b\s*/, "").trim();
+    return (
+      "Essência Desmarola " + (aroma ? restaurarAcentos(aroma) : "Desconhecida")
+    );
   }
 
   return formatarTitleCase(nomeOriginal);
@@ -176,7 +251,8 @@ export function sugerirNomeOficial(nomeOriginal: string, _nomeNormalizado: strin
 
 // ── Distância de Levenshtein (para tolerância a erro de digitação) ──
 function levenshtein(a: string, b: string): number {
-  const m = a.length, n = b.length;
+  const m = a.length,
+    n = b.length;
   const dp: number[] = Array.from({ length: n + 1 }, (_, j) => j);
   for (let i = 1; i <= m; i++) {
     let prev = dp[0];
@@ -186,7 +262,7 @@ function levenshtein(a: string, b: string): number {
       dp[j] = Math.min(
         dp[j] + 1,
         dp[j - 1] + 1,
-        prev + (a[i - 1] === b[j - 1] ? 0 : 1)
+        prev + (a[i - 1] === b[j - 1] ? 0 : 1),
       );
       prev = temp;
     }
@@ -198,41 +274,75 @@ function qualsAtendidos(pTok: string[], quals: string[]): boolean {
   return quals.every((q) => pTok.includes(q));
 }
 
-function encontrarProduto(nomeTexto: string, produtos: ProdutoInput[]): ProdutoInput | undefined {
+// ── Tipo de item citado no texto (rot/caixa/frasco/essência) ──
+function tipoCitado(nomeNormTexto: string): string | null {
+  if (/\brot\w*\b/.test(nomeNormTexto)) return "rotulo";
+  if (/\bcaixas?\b/.test(nomeNormTexto)) return "caixa";
+  if (/\bfrascos?\b/.test(nomeNormTexto)) return "frasco";
+  if (/\bessencias?\b/.test(nomeNormTexto)) return "essencia";
+  return null;
+}
+function tipoDoProduto(nomeNorm: string): string | null {
+  if (nomeNorm.includes("essencia")) return "essencia";
+  if (nomeNorm.includes("rotulo")) return "rotulo";
+  if (nomeNorm.startsWith("caixa")) return "caixa";
+  if (nomeNorm.startsWith("frasco")) return "frasco";
+  return null;
+}
+function ehInsumo(nomeNorm: string): boolean {
+  return (
+    nomeNorm.includes("essencia") ||
+    /\bcaixa\b/.test(nomeNorm) ||
+    /\brotulo\b/.test(nomeNorm) ||
+    nomeNorm.startsWith("frasco") ||
+    nomeNorm.includes("velcro")
+  );
+}
+function encontrarProduto(
+  nomeTexto: string,
+  produtos: ProdutoInput[],
+): ProdutoInput | undefined {
   const tTok = tokensDe(nomeTexto);
   if (tTok.length === 0) return undefined;
   const quals = tTok.filter((t) => QUALIFICADORES.has(t));
-
+  const nomeNormTexto = normalizar(nomeTexto);
+  const tipoTexto = tipoCitado(nomeNormTexto);
   // 0ª passada: match EXATO de nome — resolve colisões tipo "Velcro (pares)" vs "Velcro (pacotes)"
-  // (ignora conectivos que sobram da extração da quantidade, ex.: "Velcro (pares) com")
-  const tNorm = normalizar(nomeTexto)
-    .split(' ')
+  const tNorm = nomeNormTexto
+    .split(" ")
     .filter(Boolean)
     .filter((t) => !CONECTIVOS.has(t))
-    .join(' ');
+    .join(" ");
   const exato = produtos.find((p) => normalizar(p.nome) === tNorm);
   if (exato) return exato;
   let melhor: ProdutoInput | undefined;
   let melhorScore = 0;
-
-  // 1ª passada: sobreposição exata de tokens
+  // 1ª passada: sobreposição de tokens + trava de tipo + acabado vence insumo
   for (const p of produtos) {
     const pTok = tokensDe(p.nome);
     if (pTok.length === 0) continue;
     const inter = pTok.filter((t) => tTok.includes(t)).length;
     if (inter === 0) continue;
     if (!qualsAtendidos(pTok, quals)) continue;
-
     let score = inter;
     for (const q of quals) if (pTok.includes(q)) score += 1;
-
+    const pNomeNorm = normalizar(p.nome);
+    const tipoP = tipoDoProduto(pNomeNorm);
+    if (tipoTexto) {
+      // Tipo citado no apelido: o produto do tipo certo ganha forte, os outros caem
+      if (tipoP === tipoTexto) score += 10;
+      else if (tipoP) score -= 10;
+    } else {
+      // Sem tipo citado: produto acabado vence; insumos só sobem se ninguém melhor casar
+      if (ehInsumo(pNomeNorm)) score -= 5;
+      if (pNomeNorm.includes("unidade")) score += 3;
+    }
     if (score > melhorScore) {
       melhorScore = score;
       melhor = p;
     }
   }
   if (melhor) return melhor;
-
   // 2ª passada: tolerância a erro de digitação (1 token, distância ≤ 1)
   if (tTok.length === 1 && quals.length === 0 && tTok[0].length >= 3) {
     let melhorDist = 2;
@@ -247,22 +357,27 @@ function encontrarProduto(nomeTexto: string, produtos: ProdutoInput[]): ProdutoI
     }
     if (melhorDist <= 1) return melhor;
   }
-
   return undefined;
 }
 
-export function parsearInventario(texto: string, produtos: ProdutoInput[]): ItemProcessado[] {
+export function parsearInventario(
+  texto: string,
+  produtos: ProdutoInput[],
+): ItemProcessado[] {
   const mapa = new Map<string, ItemProcessado>();
 
   for (const linha of texto.split(/\r?\n/)) {
-    const l = linha.trim().replace(/^[-*•]\s*/, '').replace(/^\d+[.)]\s+/, '');
+    const l = linha
+      .trim()
+      .replace(/^[-*•]\s*/, "")
+      .replace(/^\d+[.)]\s+/, "");
     if (!l) continue;
 
-    let nomeTexto = '';
+    let nomeTexto = "";
     let quantidade = 0;
 
-    if (l.includes(':')) {
-      const idx = l.indexOf(':');
+    if (l.includes(":")) {
+      const idx = l.indexOf(":");
       nomeTexto = l.slice(0, idx).trim();
       quantidade = parseNumero(l.slice(idx + 1)) ?? 0;
       if (!nomeTexto || quantidade === 0) continue;
@@ -272,21 +387,21 @@ export function parsearInventario(texto: string, produtos: ProdutoInput[]): Item
         // "20.400 emb. yerba" / "20.000 mil emb. yerbinha"
         let bruto = toks[0];
         let consumidos = 1;
-        if (toks[1] && limparUnidade(toks[1]) === 'mil') {
-          bruto += ' mil';
+        if (toks[1] && limparUnidade(toks[1]) === "mil") {
+          bruto += " mil";
           consumidos = 2;
         }
         quantidade = parseNumero(bruto) ?? 0;
-        nomeTexto = toks.slice(consumidos).join(' ').trim();
+        nomeTexto = toks.slice(consumidos).join(" ").trim();
       } else if (/^-?[\d.,]+$/.test(toks[toks.length - 1])) {
         quantidade = parseNumero(toks[toks.length - 1]) ?? 0;
-        nomeTexto = toks.slice(0, -1).join(' ').trim();
+        nomeTexto = toks.slice(0, -1).join(" ").trim();
       }
       if (!nomeTexto || quantidade === 0) continue;
     }
 
     const produto = encontrarProduto(nomeTexto, produtos);
-    const chave = produto ? produto.id : 'novo:' + normalizar(nomeTexto);
+    const chave = produto ? produto.id : "novo:" + normalizar(nomeTexto);
 
     const existente = mapa.get(chave);
     if (existente) {
@@ -297,7 +412,9 @@ export function parsearInventario(texto: string, produtos: ProdutoInput[]): Item
     } else {
       mapa.set(chave, {
         nomeOriginal: linha.trim(),
-        nomeCatalogo: produto ? produto.nome : sugerirNomeOficial(nomeTexto, ''),
+        nomeCatalogo: produto
+          ? produto.nome
+          : sugerirNomeOficial(nomeTexto, ""),
         produto_id: produto?.id,
         quantidade_contada: quantidade,
         encontrado: !!produto,
@@ -307,4 +424,4 @@ export function parsearInventario(texto: string, produtos: ProdutoInput[]): Item
   }
 
   return Array.from(mapa.values());
-} 
+}

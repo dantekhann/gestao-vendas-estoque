@@ -43,7 +43,10 @@ function interpretarLista(
       /\s+(un|unidades|pares|pacotes)$/,
       "",
     );
-    const m = limpa.match(/^(.+?)\s*[=:]\s*([\d.,]+)$/);
+    // Formato 1: "nome = quantidade" | Formato 2: "quantidade nome" (ex: 164 rot. Bambu)
+    const mFmt1 = limpa.match(/^(.+?)\s*[=:]\s*([\d.,]+)$/);
+    const mFmt2 = mFmt1 ? null : limpa.match(/^([\d.,]+)\s+(.+)$/);
+    const m = mFmt1 ?? mFmt2;
 
     if (!m) {
       saida.push({
@@ -58,11 +61,33 @@ function interpretarLista(
       continue;
     }
 
-    const alias = m[1].trim();
-    const quantidade = Math.round(Number(m[2].replace(/[.,]/g, ""))) || 0;
+    const alias = (mFmt1 ? m[1] : m[2]).trim();
+    const quantidade =
+      Math.round(Number((mFmt1 ? m[2] : m[1]).replace(/[.,]/g, ""))) || 0;
     const termos = alias.split(/\s+/).filter((t) => t.length > 1);
-    // Produto acabado vence: insumos (caixa, rótulo, frasco, essência, velcro)
-    // só entram como opção quando nenhum acabado casar
+
+    // Tipo citado no apelido trava a busca: rot → Rótulo, caixa → Caixa,
+    // frasco → Frasco, essência → Essência
+    const tipoPreferido = /(^|\s)rot/.test(alias)
+      ? "rotulo"
+      : /(^|\s)caixa/.test(alias)
+        ? "caixa"
+        : /(^|\s)frasco/.test(alias)
+          ? "frasco"
+          : alias.includes("essencia")
+            ? "essencia"
+            : null;
+
+    const tipoDoProduto = (nomeNorm: string): string | null => {
+      if (nomeNorm.includes("essencia")) return "essencia";
+      if (nomeNorm.includes("rotulo")) return "rotulo";
+      if (nomeNorm.startsWith("caixa")) return "caixa";
+      if (nomeNorm.startsWith("frasco")) return "frasco";
+      return null;
+    };
+
+    // Produto acabado vence quando nenhum tipo é citado; insumos só sobem
+    // se nenhum acabado casar
     const ehInsumo = (p: Produto) => {
       const n = normalizar(p.nome);
       return (
@@ -78,7 +103,13 @@ function interpretarLista(
     const opcoes = produtos
       .map((p) => {
         const nomeNorm = normalizar(p.nome);
-        return { p, score: termos.filter((t) => nomeNorm.includes(t)).length };
+        let score = termos.filter((t) => nomeNorm.includes(t)).length;
+        if (tipoPreferido) {
+          const tipoP = tipoDoProduto(nomeNorm);
+          if (tipoP === tipoPreferido) score += 10;
+          else if (tipoP) score -= 10;
+        }
+        return { p, score };
       })
       .filter((c) => c.score > 0)
       .sort((a, b) => {
