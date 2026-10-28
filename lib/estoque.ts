@@ -1,6 +1,8 @@
 import { supabase } from "@/lib/supabase";
+
 export type TipoMovimentacao = "ENTRADA" | "SAIDA" | "AJUSTE" | "VENDA";
-export const PROPORCAO_VELCRO_PAR_PACOTE = 504;
+
+export const PROPORCAO_VELCRO_PAR_PACOTE = 500;
 
 // ============================================================
 // CAIXAS DE DISPLAY: 1 caixa descontada por display produzido
@@ -10,30 +12,25 @@ const CAIXA_POR_DISPLAY: Record<string, string> = {
   "display yerbinha": "Caixas Yerbinha",
 };
 
-export async function descontarCaixaDoDisplay(
+async function descontarCaixaDoDisplay(
   nomeDisplay: string,
   quantidadeProduzida: number,
 ): Promise<void> {
-  // Só age se o produto for um display com caixa associada
   const chave = Object.keys(CAIXA_POR_DISPLAY).find((k) =>
     nomeDisplay.toLowerCase().includes(k),
   );
   if (!chave) return;
-
   const nomeCaixa = CAIXA_POR_DISPLAY[chave];
   const quantidadeCaixas = Math.max(1, Math.round(quantidadeProduzida));
-
-  // Busca o produto da caixa (apenas ativos, igual ao padrão do velcro)
   const { data: caixas, error: erroCaixa } = await supabase
     .from("produtos")
     .select("id, nome, estoque_atual")
     .ilike("nome", `%${nomeCaixa}%`)
     .eq("ativo", true)
     .limit(1);
-
   if (erroCaixa) {
     console.error(`Erro ao buscar ${nomeCaixa}:`, erroCaixa);
-    return; // não interrompe a produção
+    return;
   }
   if (!caixas || caixas.length === 0) {
     console.warn(
@@ -41,10 +38,7 @@ export async function descontarCaixaDoDisplay(
     );
     return;
   }
-
   const caixa = caixas[0];
-
-  // Lança a movimentação de SAÍDA na tabela certa (gravação direta, sem efeitos em cadeia)
   const { error: erroMov } = await supabase
     .from("movimentacoes_estoque")
     .insert({
@@ -53,19 +47,16 @@ export async function descontarCaixaDoDisplay(
       quantidade: quantidadeCaixas,
       observacao: `Sincronização automática (Baixa de ${nomeCaixa} para ${nomeDisplay})`,
     });
-
   if (erroMov) {
     console.error(`Erro ao lançar baixa de ${nomeCaixa}:`, erroMov);
     return;
   }
-
-  // Atualiza o estoque da caixa
-  const novoEstoqueCaixa = (caixa.estoque_atual ?? 0) - quantidadeCaixas;
   await supabase
     .from("produtos")
-    .update({ estoque_atual: novoEstoqueCaixa })
+    .update({ estoque_atual: (caixa.estoque_atual ?? 0) - quantidadeCaixas })
     .eq("id", caixa.id);
 }
+
 // ============================================================
 // SINCRONIZAÇÃO DESMAROLA: 1 unidade consome 1 rótulo + 1 caixa + 1 frasco
 // ============================================================
@@ -85,13 +76,11 @@ async function descontarInsumosDesmarola(
   const sabor = extrairSaborDesmarola(nomeProduto);
   if (!sabor) return;
   const qtd = Math.max(1, Math.round(quantidade));
-
   const alvos = [
     `Rótulo Desmarola ${sabor}`,
     `Caixa Desmarola ${sabor}`,
     "Frascos Desmarola",
   ];
-
   for (const nomeAlvo of alvos) {
     const { data: insumos, error: erroBusca } = await supabase
       .from("produtos")
@@ -129,7 +118,67 @@ async function descontarInsumosDesmarola(
   }
 }
 
-interface RegistarMovimentacaoParams {
+// ============================================================
+// DISPLAY DE BOLADOS: 1 display consome 10 maços + 120 bolados (12 por maço)
+// ============================================================
+const MACOS_POR_DISPLAY = 10;
+const BOLADOS_POR_DISPLAY = 120;
+
+async function descontarInsumosBolados(
+  nomeProduto: string,
+  quantidade: number,
+): Promise<void> {
+  console.log(`[Bolados Sync] chamada: "${nomeProduto}" x${quantidade}`);
+  const lower = nomeProduto.toLowerCase();
+  if (!lower.includes("display") || !lower.includes("bolado")) return;
+  const qtd = Math.round(quantidade);
+  if (qtd <= 0) return;
+  const alvos = [
+    { termo: "Maços", quantidade: qtd * MACOS_POR_DISPLAY },
+    { termo: "Bolados", quantidade: qtd * BOLADOS_POR_DISPLAY },
+  ];
+  for (const alvo of alvos) {
+    const { data: insumos, error: erroBusca } = await supabase
+      .from("produtos")
+      .select("id, nome, estoque_atual")
+      .ilike("nome", `%${alvo.termo}%`)
+      .eq("ativo", true)
+      .limit(5);
+    if (erroBusca) {
+      console.error(`Erro ao buscar ${alvo.termo}:`, erroBusca);
+      continue;
+    }
+    // Preferência: match exato do nome (evita casar com "Rolo Saco Plástico (bolados)")
+    const lowerTermo = alvo.termo.toLowerCase();
+    const insumo =
+      (insumos ?? []).find((p) => p.nome.toLowerCase() === lowerTermo) ??
+      (insumos ?? []).find((p) => !p.nome.toLowerCase().includes("display"));
+    if (!insumo) {
+      console.warn(
+        `Insumo "${alvo.termo}" não encontrado ou inativo. Baixa ignorada.`,
+      );
+      continue;
+    }
+    const { error: erroMov } = await supabase
+      .from("movimentacoes_estoque")
+      .insert({
+        produto_id: insumo.id,
+        tipo: "SAIDA",
+        quantidade: alvo.quantidade,
+        observacao: `Sincronização automática (Baixa de ${insumo.nome} para ${nomeProduto})`,
+      });
+    if (erroMov) {
+      console.error(`Erro ao lançar baixa de ${insumo.nome}:`, erroMov);
+      continue;
+    }
+    await supabase
+      .from("produtos")
+      .update({ estoque_atual: (insumo.estoque_atual ?? 0) - alvo.quantidade })
+      .eq("id", insumo.id);
+  }
+}
+
+interface RegistrarMovimentacaoParams {
   produtoId: string;
   tipo: TipoMovimentacao;
   quantidade: number;
@@ -137,17 +186,14 @@ interface RegistarMovimentacaoParams {
   sincronizarVelcro?: boolean;
 }
 
-export async function registarMovimentacaoEstoque({
+export async function registrarMovimentacaoEstoque({
   produtoId,
   tipo,
-  quantidade: quantidadeRaw,
+  quantidade,
   observacao,
   sincronizarVelcro = true,
-}: RegistarMovimentacaoParams) {
+}: RegistrarMovimentacaoParams) {
   try {
-    // Forçar conversão estrita para número para evitar concatenação de strings ou NaN
-    const quantidade = Number(quantidadeRaw) || 0;
-
     // 1. Buscar dados do produto (nome e estoque atual)
     const { data: produto, error: erroProdBusca } = await supabase
       .from("produtos")
@@ -155,7 +201,6 @@ export async function registarMovimentacaoEstoque({
       .eq("id", produtoId)
       .single();
     if (erroProdBusca) throw erroProdBusca;
-
     // 2. Inserir o registo na tabela de movimentações
     const { error: erroMov } = await supabase
       .from("movimentacoes_estoque")
@@ -168,7 +213,6 @@ export async function registarMovimentacaoEstoque({
         },
       ]);
     if (erroMov) throw erroMov;
-
     // 3. Buscar o estoque atual e calcular o novo valor
     const estoqueAtual = Number(produto?.estoque_atual) || 0;
     let novoEstoque = estoqueAtual;
@@ -179,15 +223,13 @@ export async function registarMovimentacaoEstoque({
     } else if (tipo === "AJUSTE") {
       novoEstoque = quantidade;
     }
-
     // 4. Atualizar o estoque na tabela de produtos
     const { error: erroProdUpdate } = await supabase
       .from("produtos")
       .update({ estoque_atual: novoEstoque })
       .eq("id", produtoId);
     if (erroProdUpdate) throw erroProdUpdate;
-
-    // 5. Sincronização Automática de Velcro com conversão numérica blindada
+    // 5. Sincronização Automática de Velcro
     if (sincronizarVelcro && produto?.nome) {
       const nomeLower = produto.nome.toLowerCase();
       if (nomeLower.includes("velcro")) {
@@ -212,23 +254,29 @@ export async function registarMovimentacaoEstoque({
             const quantidadeConvertida = ePacote
               ? Math.round(quantidade * PROPORCAO_VELCRO_PAR_PACOTE)
               : Math.round(quantidade / PROPORCAO_VELCRO_PAR_PACOTE);
-            await registarMovimentacaoEstoque({
+            await registrarMovimentacaoEstoque({
               produtoId: produtoParceiro.id,
               tipo,
               quantidade: quantidadeConvertida,
               observacao: `Sincronização automática de Velcro (${ePacote ? "Pacotes ➔ Pares" : "Pares ➔ Pacotes"})`,
-              sincronizarVelcro: false, // Previne loop infinito
+              sincronizarVelcro: false,
             });
           }
         }
       }
     }
-
     // 6. Sincronização Desmarola: 1 unidade = 1 rótulo + 1 caixa + 1 frasco
     if (tipo === "ENTRADA" && produto?.nome) {
       await descontarInsumosDesmarola(produto.nome, quantidade);
     }
-
+    // 7. Sincronização Display de Bolados: 1 display = 10 maços + 120 bolados
+    if (tipo === "ENTRADA" && produto?.nome) {
+      await descontarInsumosBolados(produto.nome, quantidade);
+    }
+    // 8. Baixa de caixa para displays Yerba/Yerbinha
+    if (tipo === "ENTRADA" && produto?.nome) {
+      await descontarCaixaDoDisplay(produto.nome, quantidade);
+    }
     return { success: true, novoEstoque };
   } catch (err: unknown) {
     const errorObj = err as { message?: string };
@@ -241,12 +289,14 @@ export async function registarMovimentacaoEstoque({
 }
 
 // Alias para compatibilidade com outras páginas
-export const movimentarEstoque = registarMovimentacaoEstoque;
+export const movimentarEstoque = registrarMovimentacaoEstoque;
+export const registarMovimentacaoEstoque = registrarMovimentacaoEstoque;
 
 // ==========================================
 // LÓGICA DE CONVERSÃO E LANÇAMENTO DE VELCRO (MANUAL)
 // ==========================================
 export type UnidadeVelcro = "pares" | "pacotes";
+
 interface ParametrosVelcro {
   produtoIdOrigem: string;
   produtoIdParceiro?: string;
@@ -293,7 +343,7 @@ export async function processarLancamentoVelcro({
       qtdConvertida = qtdNum * PROPORCAO_VELCRO_PAR_PACOTE;
     }
     if (registrarOrigem) {
-      await registarMovimentacaoEstoque({
+      await registrarMovimentacaoEstoque({
         produtoId: produtoIdOrigem,
         tipo,
         quantidade: qtdNum,
