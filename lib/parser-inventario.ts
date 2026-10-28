@@ -359,11 +359,66 @@ function encontrarProduto(
   }
   return undefined;
 }
+// ── Bloco "Contagem bolados": consolida linhas "Produtor: quantidade" ──
+function colapsarBlocoBolados(texto: string): string {
+  const linhas = texto.split("\n");
+  const saida: string[] = [];
+  let emBloco = false;
+  let soma = 0;
 
+  const numeroDe = (s: string): number | null => {
+    const m = s.match(/([\d][\d.,]*)/);
+    if (!m) return null;
+    const n = Number(m[1].replace(/\./g, "").replace(",", "."));
+    return Number.isFinite(n) ? Math.round(n) : null;
+  };
+
+  const flush = () => {
+    if (emBloco && soma > 0) saida.push(`${soma} bolados`);
+    emBloco = false;
+    soma = 0;
+  };
+
+  for (const linha of linhas) {
+    const limpa = linha.trim();
+    if (!limpa) {
+      if (!emBloco) saida.push(linha);
+      continue;
+    }
+    const norm = normalizar(limpa);
+
+    // Cabeçalho do bloco: linha citando "bolado" (ex.: "Contagem bolados:")
+    if (!emBloco && norm.includes("bolado")) {
+      emBloco = true;
+      const n = numeroDe(limpa);
+      if (n !== null && n > 0) soma += n;
+      continue;
+    }
+
+    if (emBloco) {
+      // "Produtor: 1234" ou "Produtor = 1234" → soma
+      const m = limpa.match(/^(.+?)\s*[=:]\s*([\d.,]+)$/);
+      if (m) {
+        const n = Number(m[2].replace(/\./g, "").replace(",", "."));
+        if (Number.isFinite(n)) soma += Math.round(n);
+        continue;
+      }
+      // Linha sem número (ex.: "Lucas: pedente") → ignorada
+      if (!/\d/.test(limpa)) continue;
+      // Linha com número fora do padrão → fim do bloco, processa normal
+      flush();
+    }
+
+    saida.push(linha);
+  }
+  flush();
+  return saida.join("\n");
+}
 export function parsearInventario(
   texto: string,
   produtos: ProdutoInput[],
 ): ItemProcessado[] {
+  texto = colapsarBlocoBolados(texto); // ← essa linha
   const mapa = new Map<string, ItemProcessado>();
 
   for (const linha of texto.split(/\r?\n/)) {
