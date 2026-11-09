@@ -11,10 +11,10 @@ interface Produto {
   nome: string;
   estoque_atual: number;
 }
-// Redireciona apelidos da lista: caixas de sabor → Display do sabor
+// Apelidos da lista: cxs/caixas de sabor → item de embalagem correspondente
 const MAPA_ALIAS_TEXTO: [RegExp, string][] = [
-  [/\b(?:cxs|caixa|caixas)\s+yerba\b/gi, "Display Yerba"],
-  [/\b(?:cxs|caixa|caixas)\s+yerbinha\b/gi, "Display Yerbinha"],
+  [/\b(?:cxs|caixa|caixas)\s+yerba\b/gi, "Caixas Yerba"],
+  [/\b(?:cxs|caixa|caixas)\s+yerbinha\b/gi, "Caixas Yerbinha"],
 ];
 
 function normalizarTextoLista(texto: string): string {
