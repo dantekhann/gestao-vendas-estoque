@@ -120,6 +120,7 @@ async function descontarInsumosDesmarola(
 
 // ============================================================
 // DISPLAY DE BOLADOS: 1 display consome 10 maços + 120 bolados (12 por maço)
+// + 1 Display Bolados (Caixa) por unidade produzida
 // ============================================================
 const MACOS_POR_DISPLAY = 10;
 const BOLADOS_POR_DISPLAY = 120;
@@ -128,14 +129,16 @@ async function descontarInsumosBolados(
   nomeProduto: string,
   quantidade: number,
 ): Promise<void> {
-  console.log(`[Bolados Sync] chamada: "${nomeProduto}" x${quantidade}`);
   const lower = nomeProduto.toLowerCase();
   if (!lower.includes("display") || !lower.includes("bolado")) return;
+  // "Display Bolados (Caixa)" é embalagem: não dispara a sincronização
+  if (lower.includes("caixa")) return;
   const qtd = Math.round(quantidade);
   if (qtd <= 0) return;
-  const alvos = [
+  const alvos: { termo: string; quantidade: number; exato?: boolean }[] = [
     { termo: "Maços", quantidade: qtd * MACOS_POR_DISPLAY },
     { termo: "Bolados", quantidade: qtd * BOLADOS_POR_DISPLAY },
+    { termo: "Display Bolados (Caixa)", quantidade: qtd, exato: true },
   ];
   for (const alvo of alvos) {
     const { data: insumos, error: erroBusca } = await supabase
@@ -150,9 +153,13 @@ async function descontarInsumosBolados(
     }
     // Preferência: match exato do nome (evita casar com "Rolo Saco Plástico (bolados)")
     const lowerTermo = alvo.termo.toLowerCase();
-    const insumo =
-      (insumos ?? []).find((p) => p.nome.toLowerCase() === lowerTermo) ??
-      (insumos ?? []).find((p) => !p.nome.toLowerCase().includes("display"));
+    const candidatoExato = (insumos ?? []).find(
+      (p) => p.nome.toLowerCase() === lowerTermo,
+    );
+    const insumo = alvo.exato
+      ? (candidatoExato ?? (insumos ?? [])[0])
+      : (candidatoExato ??
+        (insumos ?? []).find((p) => !p.nome.toLowerCase().includes("display")));
     if (!insumo) {
       console.warn(
         `Insumo "${alvo.termo}" não encontrado ou inativo. Baixa ignorada.`,
