@@ -11,6 +11,7 @@ export interface DiaHistorico {
   chave: string;
   data: string;
   total: number;
+  itens: { nome: string; quantidade: number }[];
 }
 
 export interface DadosRelatorio {
@@ -20,15 +21,33 @@ export interface DadosRelatorio {
   historicoSemana: DiaHistorico[];
 }
 
-// Ordem fixa dos grupos — produtos para venda primeiro
-const ORDEM_CATEGORIAS = [
-  "PRODUTO FINALIZADO",
-  "INSUMO (MATÉRIA-PRIMA)",
-  "EMBALAGEM",
-  "ALMOXARIFADO (CONSUMO INTERNO)",
-  "EPI",
-  "SEM CLASSIFICAÇÃO",
+// ============================================================
+// ORDEM FIXA DOS GRUPOS — produtos para venda primeiro.
+// chave = prefixo (minúsculo) da classificação gravada no cadastro.
+// Qualquer classificação fora da lista cai no bloco ⚠️ OUTROS.
+// ============================================================
+const ORDEM_CATEGORIAS: { chave: string; rotulo: string }[] = [
+  { chave: "produto finalizado", rotulo: "PRODUTO FINALIZADO" },
+  { chave: "insumo", rotulo: "INSUMO (MATÉRIA-PRIMA)" },
+  { chave: "embalagem", rotulo: "EMBALAGEM" },
+  { chave: "almoxarifado", rotulo: "ALMOXARIFADO (CONSUMO INTERNO)" },
+  { chave: "epi", rotulo: "EPI" },
 ];
+
+// Segunda-feira da semana corrente, 00:00 — usada na coleta E no cabeçalho,
+// para os dois nunca divergirem
+function segundaFeiraCorrente(): Date {
+  const agoraRef = new Date();
+  const segunda = new Date(
+    agoraRef.getFullYear(),
+    agoraRef.getMonth(),
+    agoraRef.getDate(),
+  );
+  const diaSemana = segunda.getDay(); // 0=dom, 1=seg, ..., 6=sáb
+  segunda.setDate(segunda.getDate() - (diaSemana === 0 ? 6 : diaSemana - 1));
+  segunda.setHours(0, 0, 0, 0);
+  return segunda;
+}
 
 function inicioDoDia(): Date {
   const agora = new Date();
@@ -142,12 +161,13 @@ function normalizarClassificacao(valor: string): string {
 }
 
 function extrairCategoria(produto: Record<string, unknown>): string {
+  // "classificacao" é a coluna real do banco (confirmada pela query SQL)
   const candidatos = [
-    "categoria",
-    "tipo",
     "classificacao",
     "classificacao_produto",
+    "categoria",
     "categoria_produto",
+    "tipo",
   ];
   for (const campo of candidatos) {
     const valor = produto[campo];
@@ -162,29 +182,16 @@ function extrairCategoria(produto: Record<string, unknown>): string {
   return "SEM CLASSIFICAÇÃO";
 }
 
-function ordenarCategorias(chaves: string[]): string[] {
-  return [...chaves].sort((a, b) => {
-    const ia = ORDEM_CATEGORIAS.indexOf(a);
-    const ib = ORDEM_CATEGORIAS.indexOf(b);
-    if (ia === -1 && ib === -1) return a.localeCompare(b);
-    if (ia === -1) return 1;
-    if (ib === -1) return -1;
-    return ia - ib;
-  });
-}
-
 export async function buscarDadosRelatorio(): Promise<DadosRelatorio> {
   const { data: produtos, error: erroProdutos } = await supabase
     .from("produtos")
     .select("*");
   if (erroProdutos) throw erroProdutos;
-
   // Tabela correta do banco: movimentacoes_estoque (igual ao lib/estoque.ts)
   const { data: movimentacoes, error: erroMovs } = await supabase
     .from("movimentacoes_estoque")
     .select("*");
   if (erroMovs) throw erroMovs;
-
   const { data: metas, error: erroMetas } = await supabase
     .from("metas_producao")
     .select("produto_id, quantidade_alvo");
@@ -198,7 +205,6 @@ export async function buscarDadosRelatorio(): Promise<DadosRelatorio> {
     nomePorId.set(id, String(p.nome ?? "Produto"));
     categoriaPorId.set(id, extrairCategoria(p));
   }
-
   const ativos = listaProdutos.filter((p) => p.ativo !== false);
 
   const faltaProduzir: LinhaRelatorio[] = (
@@ -216,7 +222,9 @@ export async function buscarDadosRelatorio(): Promise<DadosRelatorio> {
 
   // Produtos que têm meta no painel "Precisa Produzir"
   const idsComMeta = new Set(
-    ((metas ?? []) as Record<string, unknown>[]).map((m) => String(m.produto_id))
+    ((metas ?? []) as Record<string, unknown>[]).map((m) =>
+      String(m.produto_id),
+    ),
   );
 
   const inicio = inicioDoDia();
@@ -224,24 +232,17 @@ export async function buscarDadosRelatorio(): Promise<DadosRelatorio> {
   for (const mov of (movimentacoes ?? []) as Record<string, unknown>[]) {
     const data = extrairData(mov);
     if (!data || data < inicio) continue;
-
     const tipo = extrairTipo(mov);
     if (!tipo.includes("ENTRADA")) continue;
-
-        // Produção = ENTRADA de produto que tem meta no painel.
-    // (Display Yerba/Yerbinha estão com código EMBALAGEM gravado numa
-    // das colunas do banco — o filtro por classificação os cortava.)
+    // Produção = ENTRADA de produto que tem meta no painel.
+    // Estorno de venda excluída devolve itens como ENTRADA — não é produção
     const id = String(mov.produto_id);
     if (!idsComMeta.has(id)) continue;
-
-    // Estorno de venda excluída devolve itens como ENTRADA — não é produção
     const obs = String(mov.observacao ?? mov.observacoes ?? "").toLowerCase();
     if (obs.includes("estorno")) continue;
-
     const qtd = extrairQuantidade(mov);
     produzidosHoje.set(id, (produzidosHoje.get(id) ?? 0) + qtd);
   }
-
   const producaoHoje: LinhaRelatorio[] = [...produzidosHoje.entries()]
     .map(([id, quantidade]) => ({
       nome: nomePorId.get(id) ?? "Produto",
@@ -259,75 +260,100 @@ export async function buscarDadosRelatorio(): Promise<DadosRelatorio> {
     }))
     .sort((a, b) => a.nome.localeCompare(b.nome));
 
-    // Histórico: produção dos últimos 7 dias (mesmas regras do relatório)
-  const seteDiasAtras = new Date();
-  seteDiasAtras.setDate(seteDiasAtras.getDate() - 6);
-  seteDiasAtras.setHours(0, 0, 0, 0);
-
-  const totaisPorDia = new Map<string, number>();
+  // Histórico: produção da semana comercial corrente (segunda a sexta)
+  const segunda = segundaFeiraCorrente();
+  const sabado = new Date(segunda);
+  sabado.setDate(sabado.getDate() + 5); // 00:00 de sábado = limite da sexta
+  const producaoPorDia = new Map<string, Map<string, number>>();
   for (const mov of (movimentacoes ?? []) as Record<string, unknown>[]) {
     const data = extrairData(mov);
-    if (!data || data < seteDiasAtras) continue;
-
+    if (!data || data < segunda || data >= sabado) continue;
     const tipo = extrairTipo(mov);
-    if (!tipo.includes('ENTRADA')) continue;
-
+    if (!tipo.includes("ENTRADA")) continue;
     const id = String(mov.produto_id);
     if (!idsComMeta.has(id)) continue;
-
-    const obs = String(mov.observacao ?? mov.observacoes ?? '').toLowerCase();
-    if (obs.includes('estorno')) continue;
-
+    const obs = String(mov.observacao ?? mov.observacoes ?? "").toLowerCase();
+    if (obs.includes("estorno")) continue;
     const qtd = extrairQuantidade(mov);
-    const chave = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}-${String(data.getDate()).padStart(2, '0')}`;
-    totaisPorDia.set(chave, (totaisPorDia.get(chave) ?? 0) + qtd);
+    const chave = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, "0")}-${String(data.getDate()).padStart(2, "0")}`;
+    if (!producaoPorDia.has(chave)) producaoPorDia.set(chave, new Map());
+    const porProduto = producaoPorDia.get(chave)!;
+    porProduto.set(id, (porProduto.get(id) ?? 0) + qtd);
   }
-
-  const historicoSemana: DiaHistorico[] = [...totaisPorDia.entries()]
-    .map(([chave, total]) => {
-      const [ano, mes, dia] = chave.split('-').map(Number);
-      const dataLegivel = new Date(ano, mes - 1, dia).toLocaleDateString('pt-BR', {
-        weekday: 'short',
-        day: '2-digit',
-        month: '2-digit',
-      });
-      return { chave, data: dataLegivel, total };
+  const historicoSemana: DiaHistorico[] = [...producaoPorDia.entries()]
+    .map(([chave, porProduto]) => {
+      const [ano, mes, dia] = chave.split("-").map(Number);
+      const dataLegivel = new Date(ano, mes - 1, dia).toLocaleDateString(
+        "pt-BR",
+        {
+          weekday: "short",
+          day: "2-digit",
+          month: "2-digit",
+        },
+      );
+      const itens = [...porProduto.entries()]
+        .map(([id, quantidade]) => ({
+          nome: nomePorId.get(id) ?? "Produto",
+          quantidade,
+        }))
+        .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+      const total = itens.reduce((s, i) => s + i.quantidade, 0);
+      return { chave, data: dataLegivel, total, itens };
     })
     .sort((a, b) => b.chave.localeCompare(a.chave));
 
   return { faltaProduzir, producaoHoje, estoqueAtual, historicoSemana };
 }
 
-function linhasPorCategoria(linhas: LinhaRelatorio[]): string {
-  if (linhas.length === 0) return "";
+// ============================================================
+// MONTAGEM DA MENSAGEM
+// ============================================================
+function linhaEstoqueTexto(l: LinhaRelatorio): string {
+  return `• ${l.nome}: ${l.quantidade.toLocaleString("pt-BR")} un.`;
+}
+
+function linhasPorCategoria(itens: LinhaRelatorio[]): string {
+  if (!itens || itens.length === 0) return "";
 
   const grupos = new Map<string, LinhaRelatorio[]>();
-  for (const linha of linhas) {
-    const chave = linha.categoria;
-    if (!grupos.has(chave)) grupos.set(chave, []);
-    grupos.get(chave)!.push(linha);
+  const outros: LinhaRelatorio[] = [];
+
+  for (const item of itens) {
+    const classNorm = (item.categoria ?? "").trim().toLowerCase();
+    const categoria = ORDEM_CATEGORIAS.find((c) =>
+      classNorm.startsWith(c.chave),
+    );
+    if (categoria) {
+      if (!grupos.has(categoria.rotulo)) grupos.set(categoria.rotulo, []);
+      grupos.get(categoria.rotulo)!.push(item);
+    } else {
+      outros.push(item);
+    }
   }
 
   const blocos: string[] = [];
-  for (const chave of ordenarCategorias([...grupos.keys()])) {
-    const linhasGrupo = grupos
-      .get(chave)!
-      .sort((a, b) => a.nome.localeCompare(b.nome));
+  for (const categoria of ORDEM_CATEGORIAS) {
+    const itensDoGrupo = (grupos.get(categoria.rotulo) ?? []).sort((a, b) =>
+      a.nome.localeCompare(b.nome, "pt-BR"),
+    );
+    if (itensDoGrupo.length === 0) continue;
     blocos.push(
-      `*${chave}*\n` + linhasGrupo.map((l) => linhaEstoqueTexto(l)).join("\n"),
+      `*${categoria.rotulo}*\n` +
+        itensDoGrupo.map(linhaEstoqueTexto).join("\n"),
     );
   }
-  return blocos.join("\n\n");
-}
 
-// Marca em ⚠️ o que está abaixo do mínimo (igual ao "Mín" do /produtos)
-function linhaEstoqueTexto(l: LinhaRelatorio): string {
-  const base = `• ${l.nome}: ${l.quantidade.toLocaleString("pt-BR")} un.`;
-  const min = l.minimo;
-  if (min !== undefined && min !== null && min > 0 && l.quantidade < min) {
-    return `${base} ⚠️ (Mín: ${min.toLocaleString("pt-BR")})`;
+  if (outros.length > 0) {
+    blocos.push(
+      `*⚠️ OUTROS (classificação a revisar no cadastro)*\n` +
+        outros
+          .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"))
+          .map(linhaEstoqueTexto)
+          .join("\n"),
+    );
   }
-  return base;
+
+  return blocos.join("\n\n");
 }
 
 export function montarMensagemRelatorio(dados: DadosRelatorio): string {
@@ -337,20 +363,8 @@ export function montarMensagemRelatorio(dados: DadosRelatorio): string {
     month: "2-digit",
     year: "numeric",
   });
-
   const partes: string[] = [];
   partes.push(`📊 *Relatório OrC Brasil — ${hoje}*`);
-
-  partes.push(
-    "🎯 *Falta produzir*\n" +
-      (dados.faltaProduzir.length === 0
-        ? "• Nenhuma meta registrada"
-        : dados.faltaProduzir
-            .map(
-              (l) => `• ${l.nome}: ${l.quantidade.toLocaleString("pt-BR")} un.`,
-            )
-            .join("\n")),
-  );
 
   partes.push(
     "🏭 *Produção de hoje*\n" +
@@ -362,18 +376,51 @@ export function montarMensagemRelatorio(dados: DadosRelatorio): string {
             )
             .join("\n")),
   );
-    const totalSemana = dados.historicoSemana.reduce((s, d) => s + d.total, 0);
-  partes.push(
-    '📅 *Produção — últimos 7 dias*\n' +
-      (dados.historicoSemana.length === 0
-        ? '• Nenhuma produção na semana'
-        : dados.historicoSemana
-            .map((d) => `• ${d.data}: ${d.total.toLocaleString('pt-BR')} un.`)
-            .join('\n')) +
-      (totalSemana > 0
-        ? `\n*Total da semana: ${totalSemana.toLocaleString('pt-BR')} un.*`
-        : '')
-  );
+
+  // Produção da semana comercial: dias detalhados + total discriminado
+  const totaisPorProduto = new Map<string, number>();
+  for (const d of dados.historicoSemana) {
+    for (const i of d.itens) {
+      totaisPorProduto.set(
+        i.nome,
+        (totaisPorProduto.get(i.nome) ?? 0) + i.quantidade,
+      );
+    }
+  }
+  const semanaTexto =
+    dados.historicoSemana.length === 0
+      ? ""
+      : dados.historicoSemana
+          .map(
+            (d) =>
+              `*${d.data}*\n` +
+              d.itens
+                .map(
+                  (i) =>
+                    `• ${i.nome}: ${i.quantidade.toLocaleString("pt-BR")} un.`,
+                )
+                .join("\n"),
+          )
+          .join("\n\n");
+  const totalTexto =
+    totaisPorProduto.size === 0
+      ? "• Nenhuma produção na semana"
+      : "*Total da semana*\n" +
+        [...totaisPorProduto.entries()]
+          .sort((a, b) => a[0].localeCompare(b[0], "pt-BR"))
+          .map(([nome, qtd]) => `• ${nome}: ${qtd.toLocaleString("pt-BR")} un.`)
+          .join("\n");
+  const segundaRef = segundaFeiraCorrente();
+  const sextaRef = new Date(segundaRef);
+  sextaRef.setDate(sextaRef.getDate() + 4);
+  const fmtDia = (d: Date) =>
+    `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
+  const intervaloTexto = `${fmtDia(segundaRef)} a ${fmtDia(sextaRef)}`;
+  const corpoProducao =
+    dados.historicoSemana.length === 0
+      ? totalTexto
+      : semanaTexto + "\n\n" + totalTexto;
+  partes.push(`📅 *Produção — ${intervaloTexto}*\n\n${corpoProducao}`);
 
   const estoqueTexto = linhasPorCategoria(dados.estoqueAtual);
   partes.push(
