@@ -10,7 +10,7 @@ interface ItemVendaDetalhe {
   quantidade: number;
   preco_unitario: number;
   subtotal: number;
-  produtos?: { nome: string } | Array<{ nome: string }> | null;
+  produtos?: { nome: string; custo_unitario?: number | null } | Array<{ nome: string; custo_unitario?: number | null }> | null;
 }
 
 interface Venda {
@@ -94,7 +94,7 @@ export default function VendasPage() {
       const { data, error } = await supabase
         .from("vendas")
         .select(
-          `*, itens_venda (id, produto_id, quantidade, preco_unitario, subtotal, produtos (nome))`,
+          `*, itens_venda (id, produto_id, quantidade, preco_unitario, subtotal, produtos (nome, custo_unitario))`,
         )
         .order("created_at", { ascending: false });
       if (error) throw error;
@@ -282,6 +282,25 @@ export default function VendasPage() {
   const totalFaturado = vendasFiltradas
     .filter((v) => !ehOrcamento(v.forma_pagamento))
     .reduce((acc, v) => acc + (v.valor_total || 0), 0);
+      // CPV do período: custo dos itens das vendas reais (orçamentos fora)
+  const totalCusto = vendasFiltradas
+    .filter((v) => !ehOrcamento(v.forma_pagamento))
+    .reduce(
+      (acc, v) =>
+        acc +
+        (v.itens_venda ?? []).reduce(
+          (s, it) =>
+            s +
+            it.quantidade *
+              (Array.isArray(it.produtos)
+                ? it.produtos[0]?.custo_unitario ?? 0
+                : it.produtos?.custo_unitario ?? 0),
+          0,
+        ),
+      0,
+    );
+  const lucroBruto = totalFaturado - totalCusto;
+  const margemPercent = totalFaturado > 0 ? (lucroBruto / totalFaturado) * 100 : 0;
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-6xl mx-auto space-y-6">
@@ -329,6 +348,20 @@ export default function VendasPage() {
           </div>
         </div>
 
+        
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 shadow-md">
+            <span className="text-xs text-slate-400 uppercase tracking-wider font-semibold">CPV do Período (custo dos itens vendidos)</span>
+            <div className="text-2xl font-bold text-rose-400 mt-1">R$ {totalCusto.toFixed(2)}</div>
+          </div>
+          <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 shadow-md">
+            <span className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Lucro Bruto (sem orçamentos)</span>
+            <div className={`text-2xl font-bold mt-1 ${lucroBruto >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+              R$ {lucroBruto.toFixed(2)}
+            </div>
+            <div className="text-xs text-slate-400 mt-1">{margemPercent.toFixed(1)}% do faturamento</div>
+          </div>
+        </div>
         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-4">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
             <h2 className="text-lg font-semibold text-slate-200">
