@@ -183,6 +183,10 @@ export default function LancarVendaPage() {
         if (encontrado) setClienteId(encontrado.id);
       }
       if (dados.desconto > 0) setDesconto(dados.desconto);
+      if (dados.desconto > 0) setDesconto(dados.desconto);
+      if (dados.tarifa > 0) setTarifa(dados.tarifa);
+      if (dados.frete > 0) setFrete(dados.frete);
+      if (dados.obsAuto && !observacao.trim()) setObservacao(dados.obsAuto);
       const semMatch = itensConvertidos.filter((i) => !i.produtoId).length;
       setImportInfo(
         `Orçamento ${dados.numeroOrcamento || "—"}${dados.clienteNome ? ` — ${dados.clienteNome}` : ""}: ${itensConvertidos.length} item(ns) identificado(s)${
@@ -344,8 +348,7 @@ export default function LancarVendaPage() {
       const partesObs: string[] = [];
       if (numeroOrcamento) partesObs.push(`Orçamento ${numeroOrcamento}`);
       if (desconto > 0) partesObs.push(`Desconto ${formatarBRL(desconto)}`);
-      if (tarifa > 0) partesObs.push(`Tarifa ${formatarBRL(tarifa)}`);
-      if (frete > 0) partesObs.push(`Frete ${formatarBRL(frete)}`);
+
       if (observacao.trim()) partesObs.push(observacao.trim());
       const observacaoFinal = partesObs.join(" | ") || null;
       // 3. Grava a venda

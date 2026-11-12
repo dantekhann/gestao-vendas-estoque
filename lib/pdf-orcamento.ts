@@ -29,6 +29,9 @@ export interface DadosPdf {
   clienteNome: string | null;
   dataTexto: string | null;
   desconto: number;
+  tarifa: number;
+  frete: number;
+  obsAuto: string | null;
   itens: ItemBruto[];
 }
 
@@ -202,8 +205,102 @@ function extrairItensModoSequencia(texto: string): ItemBruto[] {
   }
   return itens;
 }
+// ============================================================
+// MERCADO LIVRE — Central de Vendedores (detalhe da venda)
+// Regra OrC: cliente fixo "Mercado Livre"; o nº da venda (#...) vai
+// pra observação. O valor unitário real vem de "Preço dos produtos"
+// (rateado entre os itens) — os valores por pacote são líquidos e não
+// são usados como preço. Quantidade = a do pedido (1ª linha de cada
+// produto; o ML repete o produto em vários pacotes).
+// Resumo: "Preço dos produtos R$ 46,72", "Tarifa de venda total -R$ 7,70",
+// "Envios -R$ 15,66".
+// ============================================================
+function extrairDadosMercadoLivre(texto: string): DadosPdf {
+  const linhas = texto.split("\n").map((l) => l.trim());
 
+  // 1ª passada: linhas de item ("... R$ 23,36   1 unidade")
+  const reLinhaUnidade = /^(.*?)(?:R\$)?\s*([\d.]+,\d{2})\s+(\d+)\s+unidad/i;
+  const linhasItem: { nomePdf: string; quantidade: number; valorLinha: number }[] = [];
+  for (let i = 0; i < linhas.length; i++) {
+    const m = linhas[i].match(reLinhaUnidade);
+    if (!m) continue;
+    // Nome do produto: a 1ª linha útil acima da linha de valores
+    let nomeLinha = "";
+    for (let j = i - 1; j >= 0 && i - j <= 3; j--) {
+      const candidata = linhas[j];
+      if (!candidata) continue;
+      if (/R\$|envio|pacote|entregue|despache|recebimento|reputação|venda #|cpf|nf-e|emissão|vendedores/i.test(candidata)) break;
+      if (candidata.length >= 5 && /[A-Za-zÀ-ÿ]/.test(candidata)) {
+        nomeLinha = candidata;
+        break;
+      }
+    }
+    const nomePdf = limparNome(nomeLinha || m[1]);
+    const valorLinha = parseNumeroBR(m[2]);
+    const quantidadeLinha = Number(m[3]);
+    if (!nomePdf || nomePdf.length < 3 || valorLinha <= 0 || quantidadeLinha <= 0) continue;
+    linhasItem.push({ nomePdf, quantidade: quantidadeLinha, valorLinha });
+  }
+
+  // Agrega por produto: soma os valores repetidos por pacote,
+  // mas mantém a quantidade da 1ª linha (a do pedido)
+  const produtos: { nomePdf: string; quantidade: number; valorLinha: number }[] = [];
+  for (const li of linhasItem) {
+    const existente = produtos.find((p) => p.nomePdf === li.nomePdf);
+    if (existente) {
+      existente.valorLinha += li.valorLinha;
+    } else {
+      produtos.push({ nomePdf: li.nomePdf, quantidade: li.quantidade, valorLinha: li.valorLinha });
+    }
+  }
+
+  // Resumo financeiro do ML
+  let precoProdutos = 0;
+  const mPreco = texto.match(/pre[çc]o dos produtos\s+(?:R\$)?\s*([\d.,]+)/i);
+  if (mPreco) precoProdutos = parseNumeroBR(mPreco[1]);
+  let tarifa = 0;
+  const mTarifa = texto.match(/tarifa de venda[^\d\n-]*-?\s*(?:R\$)?\s*([\d.,]+)/i);
+  if (mTarifa) tarifa = parseNumeroBR(mTarifa[1]);
+  let frete = 0;
+  const mEnvios = texto.match(/envios\s+-?\s*(?:R\$)?\s*([\d.,]+)/i);
+  if (mEnvios) frete = parseNumeroBR(mEnvios[1]);
+
+  // Itens finais: subtotal real = "Preço dos produtos" rateado proporcionalmente
+  // pelos valores das linhas; quantidade = a do pedido (1ª linha de cada produto)
+  const somaValores = produtos.reduce((s, p) => s + p.valorLinha, 0);
+  const itens: ItemBruto[] = produtos.map((p) => {
+    const subtotalBruto =
+      precoProdutos > 0 && somaValores > 0
+        ? (precoProdutos * p.valorLinha) / somaValores
+        : p.valorLinha;
+    const quantidade = Math.max(1, Math.round(p.quantidade));
+    const precoUnit = Number((subtotalBruto / quantidade).toFixed(2));
+    const subtotal = Number((quantidade * precoUnit).toFixed(2));
+    return { nomePdf: p.nomePdf, quantidade, precoUnit, subtotal };
+  });
+
+  // Nº da venda ("Venda #2000015846945191") → observação
+  let obsAuto: string | null = null;
+  const mVenda = texto.match(/venda\s*#(\d{6,})/i);
+  if (mVenda) obsAuto = `#${mVenda[1]}`;
+
+  // Cliente fixo: todas as vendas do ML entram como "Mercado Livre"
+  return {
+    numeroOrcamento: null,
+    clienteNome: "Mercado Livre",
+    dataTexto: null,
+    desconto: 0,
+    tarifa,
+    frete,
+    obsAuto,
+    itens,
+  };
+}
 export function extrairDadosDoPdf(texto: string): DadosPdf {
+  // Layout da Central de Vendedores do Mercado Livre tem formato próprio
+  if (/venda\s*#\d{8,}/i.test(texto) && /central de vendedores|ebazar/i.test(texto)) {
+    return extrairDadosMercadoLivre(texto);
+  }
   // Itens primeiro (o desconto implícito depende deles)
   let itens = extrairItensModoLinha(texto);
   if (itens.length === 0) {
@@ -224,8 +321,8 @@ export function extrairDadosDoPdf(texto: string): DadosPdf {
         .replace(/[-–].*$/, "")
         .trim()
         .slice(0, 80) || null;
-  }
-  if (!clienteNome) {
+  }  
+if (!clienteNome) {
     const mOrc = texto.match(/or[cç]amento\s*\d{2,6}[^\n]*\n+([^\n]+)/i);
     if (mOrc) clienteNome = mOrc[1].trim().slice(0, 80) || null;
   }
@@ -252,7 +349,7 @@ export function extrairDadosDoPdf(texto: string): DadosPdf {
       }
     }
   }
-  return { numeroOrcamento, clienteNome, dataTexto, desconto, itens };
+    return { numeroOrcamento, clienteNome, dataTexto, desconto, tarifa: 0, frete: 0, obsAuto: null, itens };
 }
 
 // ============================================================
