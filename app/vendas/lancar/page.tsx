@@ -12,13 +12,8 @@ import {
   type ProdutoCatalogo,
 } from "@/lib/pdf-orcamento";
 
-// ============================================================
-// FORMAS DE PAGAMENTO (códigos gravados no banco)
-// ORCAMENTO = não é venda, não desconta estoque.
-//   Vira venda pelo botão "Converter" no Histórico (aí desconta).
-// "-" = venda real com pagamento não identificado (desconta;
-//   a forma real se identifica depois pela Edição no Histórico).
-// ============================================================
+// ORCAMENTO = não é venda, não desconta estoque (vira venda pelo "Converter" no Histórico)
+// "-" = venda real com pagamento não identificado (desconta; identifica depois na Edição)
 const FORMAS_PAGAMENTO = [
   "PIX",
   "CARTAO",
@@ -28,7 +23,6 @@ const FORMAS_PAGAMENTO = [
   "ORCAMENTO",
   "-",
 ];
-
 const ROTULO_PAGAMENTO: Record<string, string> = {
   PIX: "PIX",
   CARTAO: "Cartão",
@@ -38,14 +32,20 @@ const ROTULO_PAGAMENTO: Record<string, string> = {
   ORCAMENTO: "Orçamento (não desconta estoque)",
   "-": "— (pagamento não identificado)",
 };
-
 function ehOrcamento(forma: string): boolean {
   return forma === "ORCAMENTO";
 }
 
-// ============================================================
-// TIPOS
-// ============================================================
+// Classes reutilizadas (mesma aparência, menos repetição)
+const clsLabel =
+  "block text-xs font-semibold uppercase tracking-wider text-slate-400";
+const clsInput =
+  "w-full p-3 border border-slate-700 rounded-xl bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-emerald-500";
+const clsItemInput =
+  "w-full mt-1 p-2 border border-slate-700 rounded-lg bg-slate-900 text-slate-100 outline-none";
+const clsModalInput =
+  "w-full p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 outline-none";
+
 interface ItemVenda {
   produtoId: string | null;
   nomePdf: string;
@@ -58,9 +58,6 @@ interface Cliente {
   nome: string;
 }
 
-// ============================================================
-// PÁGINA
-// ============================================================
 export default function LancarVendaPage() {
   const router = useRouter();
   const supabase = createClient();
@@ -72,6 +69,8 @@ export default function LancarVendaPage() {
   const [produtos, setProdutos] = useState<ProdutoCatalogo[]>([]);
   const [itens, setItens] = useState<ItemVenda[]>([]);
   const [desconto, setDesconto] = useState<number>(0);
+  const [tarifa, setTarifa] = useState<number>(0);
+  const [frete, setFrete] = useState<number>(0);
   const [formaPagamento, setFormaPagamento] = useState<string>("PIX");
   const [observacao, setObservacao] = useState<string>("");
   const [numeroOrcamento, setNumeroOrcamento] = useState<string | null>(null);
@@ -141,7 +140,7 @@ export default function LancarVendaPage() {
   );
 
   const subtotalItens = itens.reduce((soma, it) => soma + it.subtotal, 0);
-  const totalLiquido = Math.max(0, subtotalItens - desconto);
+  const totalLiquido = Math.max(0, subtotalItens - desconto - tarifa - frete);
   const itensSemProduto = itens.filter((it) => !it.produtoId).length;
 
   // ---------- IMPORTAÇÃO DO PDF ----------
@@ -155,7 +154,6 @@ export default function LancarVendaPage() {
     setImportInfo(null);
     try {
       const texto = await extrairTextoDoPdf(arquivo);
-      // Depuração: útil se um PDF de layout diferente falhar; pode remover depois
       console.log("[PDF EXTRAÍDO]", texto);
       const dados = extrairDadosDoPdf(texto);
       if (dados.itens.length === 0) {
@@ -299,8 +297,7 @@ export default function LancarVendaPage() {
     const eOrcamento = ehOrcamento(formaPagamento);
     setCarregando(true);
     try {
-      // 1. Resolve o cliente, em ordem de prioridade:
-      //    digitado manualmente > selecionado na lista > nome vindo do PDF (cadastra sozinho)
+      // 1. Resolve o cliente: digitado > selecionado na lista > nome do PDF (cadastra sozinho)
       let clienteFinalNome = "Cliente Avulso";
       if (usarNovoCliente && novoClienteNome.trim()) {
         clienteFinalNome = novoClienteNome.trim();
@@ -318,7 +315,6 @@ export default function LancarVendaPage() {
         if (cli) clienteFinalNome = cli.nome;
       } else if (clientePdfNome) {
         clienteFinalNome = clientePdfNome;
-        // Evita duplicado: cadastra só se o nome ainda não existir no cadastro
         const { data: cliExistente } = await supabase
           .from("clientes")
           .select("id, nome")
@@ -344,13 +340,15 @@ export default function LancarVendaPage() {
           }
         }
       }
-      // 2. Monta a observação com os dados do orçamento (visível e filtrável no histórico)
+      // 2. Observação com orçamento e deduções (visível e filtrável no histórico)
       const partesObs: string[] = [];
       if (numeroOrcamento) partesObs.push(`Orçamento ${numeroOrcamento}`);
       if (desconto > 0) partesObs.push(`Desconto ${formatarBRL(desconto)}`);
+      if (tarifa > 0) partesObs.push(`Tarifa ${formatarBRL(tarifa)}`);
+      if (frete > 0) partesObs.push(`Frete ${formatarBRL(frete)}`);
       if (observacao.trim()) partesObs.push(observacao.trim());
       const observacaoFinal = partesObs.join(" | ") || null;
-      // 3. Grava a venda nas colunas que o Histórico de Vendas lê
+      // 3. Grava a venda
       const { data: vendaCriada, error: erroVenda } = await supabase
         .from("vendas")
         .insert({
@@ -375,7 +373,7 @@ export default function LancarVendaPage() {
         .from("itens_venda")
         .insert(linhasItens);
       if (erroItens) throw erroItens;
-      // 5. Desconta o estoque de cada item — EXCETO quando é orçamento
+      // 5. Desconta o estoque — EXCETO quando é orçamento
       if (!eOrcamento) {
         for (const it of itens) {
           await registarMovimentacaoEstoque({
@@ -394,6 +392,8 @@ export default function LancarVendaPage() {
       );
       setItens([]);
       setDesconto(0);
+      setTarifa(0);
+      setFrete(0);
       setObservacao("");
       setNumeroOrcamento(null);
       setClientePdfNome(null);
@@ -402,7 +402,6 @@ export default function LancarVendaPage() {
       setNovoClienteNome("");
       setImportInfo(null);
     } catch (err: unknown) {
-      // Expõe o erro completo (código, mensagem, detalhe) na faixa vermelha e no console
       let detalhe = "";
       if (err instanceof Error) {
         detalhe = err.message;
@@ -419,6 +418,13 @@ export default function LancarVendaPage() {
     }
     setCarregando(false);
   };
+
+  // Deduções exibidas juntas na seção 4 (desconto, tarifa, frete)
+  const deducoes: [string, number, (n: number) => void][] = [
+    ["DESCONTO (R$)", desconto, setDesconto],
+    ["TARIFA (R$)", tarifa, setTarifa],
+    ["FRETE (R$)", frete, setFrete],
+  ];
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 py-12 px-4 sm:px-6 lg:px-8 flex justify-center items-start">
@@ -458,7 +464,7 @@ export default function LancarVendaPage() {
 
           {/* IMPORTAÇÃO DO PDF */}
           <div className="space-y-2">
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+            <label className={clsLabel}>
               IMPORTAR PEDIDO DO WHATSAPP (PDF)
             </label>
             <p className="text-[11px] text-slate-500">
@@ -482,11 +488,9 @@ export default function LancarVendaPage() {
             )}
           </div>
 
-          {/* CLIENTE */}
+          {/* 1. CLIENTE */}
           <div className="space-y-1.5">
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
-              1. IDENTIFICAÇÃO DO CLIENTE
-            </label>
+            <label className={clsLabel}>1. IDENTIFICAÇÃO DO CLIENTE</label>
             {!usarNovoCliente ? (
               <div className="flex gap-2">
                 <select
@@ -520,7 +524,7 @@ export default function LancarVendaPage() {
                   placeholder="Nome do novo cliente"
                   value={novoClienteNome}
                   onChange={(e) => setNovoClienteNome(e.target.value)}
-                  className="flex-1 p-3 border border-slate-700 rounded-xl bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+                  className={clsInput}
                 />
                 <button
                   type="button"
@@ -536,49 +540,9 @@ export default function LancarVendaPage() {
             )}
           </div>
 
-          {/* FORMA DE PAGAMENTO E DESCONTO */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
-                FORMA DE PAGAMENTO
-              </label>
-              <select
-                value={formaPagamento}
-                onChange={(e) => setFormaPagamento(e.target.value)}
-                className="w-full p-3 border border-slate-700 rounded-xl bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
-              >
-                {FORMAS_PAGAMENTO.map((f) => (
-                  <option key={f} value={f}>
-                    {ROTULO_PAGAMENTO[f]}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
-                DESCONTO (R$)
-              </label>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={desconto}
-                onChange={(e) => setDesconto(Number(e.target.value))}
-                className="w-full p-3 border border-slate-700 rounded-xl bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
-              />
-            </div>
-          </div>
-          {ehOrcamento(formaPagamento) && (
-            <div className="p-3 border border-amber-500/30 bg-amber-950/40 text-amber-400 rounded-xl text-xs">
-              💡 Orçamento não desconta estoque. Para virar venda, use o botão
-              "Converter" no Histórico de Vendas — aí sim o estoque é
-              descontado.
-            </div>
-          )}
-
-          {/* PESQUISA DE PRODUTOS (ADICIONAR MANUAL) */}
+          {/* 2. PESQUISA E SELEÇÃO DE PRODUTOS */}
           <div className="space-y-1.5 relative" ref={dropdownRef}>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+            <label className={clsLabel}>
               2. PESQUISA E SELEÇÃO DE PRODUTOS
             </label>
             <div className="grid grid-cols-3 gap-2">
@@ -599,7 +563,7 @@ export default function LancarVendaPage() {
                 value={qtdNovoItem}
                 onChange={(e) => setQtdNovoItem(Number(e.target.value))}
                 placeholder="Qtd"
-                className="p-3 border border-slate-700 rounded-xl bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+                className={clsInput}
               />
               <input
                 type="number"
@@ -608,7 +572,7 @@ export default function LancarVendaPage() {
                 value={precoNovoItem}
                 onChange={(e) => setPrecoNovoItem(Number(e.target.value))}
                 placeholder="Preço Unit. (R$)"
-                className="p-3 border border-slate-700 rounded-xl bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+                className={clsInput}
               />
               <button
                 type="button"
@@ -639,10 +603,9 @@ export default function LancarVendaPage() {
               </div>
             )}
           </div>
-
-          {/* ITENS DA VENDA */}
+          {/* 3. ITENS DA VENDA */}
           <div className="space-y-1.5">
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+            <label className={clsLabel}>
               3. ITENS DA VENDA ({itens.length})
             </label>
             {itens.length === 0 ? (
@@ -710,7 +673,7 @@ export default function LancarVendaPage() {
                                 Number(e.target.value),
                               )
                             }
-                            className="w-full mt-1 p-2 border border-slate-700 rounded-lg bg-slate-900 text-slate-100 outline-none"
+                            className={clsItemInput}
                           />
                         </label>
                         <label className="text-[11px] text-slate-500">
@@ -727,7 +690,7 @@ export default function LancarVendaPage() {
                                 Number(e.target.value),
                               )
                             }
-                            className="w-full mt-1 p-2 border border-slate-700 rounded-lg bg-slate-900 text-slate-100 outline-none"
+                            className={clsItemInput}
                           />
                         </label>
                         <div className="text-[11px] text-slate-500">
@@ -744,6 +707,46 @@ export default function LancarVendaPage() {
             )}
           </div>
 
+          {/* 4. FORMA DE PAGAMENTO E DEDUÇÕES */}
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <label className={clsLabel}>4. FORMA DE PAGAMENTO</label>
+              <select
+                value={formaPagamento}
+                onChange={(e) => setFormaPagamento(e.target.value)}
+                className={clsInput}
+              >
+                {FORMAS_PAGAMENTO.map((f) => (
+                  <option key={f} value={f}>
+                    {ROTULO_PAGAMENTO[f]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              {deducoes.map(([rotulo, valor, setValor]) => (
+                <div key={rotulo} className="space-y-1.5">
+                  <label className={clsLabel}>{rotulo}</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={valor}
+                    onChange={(e) => setValor(Number(e.target.value))}
+                    className={clsInput}
+                  />
+                </div>
+              ))}
+            </div>
+            {ehOrcamento(formaPagamento) && (
+              <div className="p-3 border border-amber-500/30 bg-amber-950/40 text-amber-400 rounded-xl text-xs">
+                💡 Orçamento não desconta estoque. Para virar venda, use o botão
+                "Converter" no Histórico de Vendas — aí sim o estoque é
+                descontado.
+              </div>
+            )}
+          </div>
+
           {/* TOTAIS */}
           <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl space-y-1 text-sm">
             <div className="flex justify-between text-slate-400">
@@ -754,6 +757,14 @@ export default function LancarVendaPage() {
               <span>Desconto</span>
               <span>- {formatarBRL(desconto)}</span>
             </div>
+            <div className="flex justify-between text-rose-400">
+              <span>Tarifa</span>
+              <span>- {formatarBRL(tarifa)}</span>
+            </div>
+            <div className="flex justify-between text-rose-400">
+              <span>Frete</span>
+              <span>- {formatarBRL(frete)}</span>
+            </div>
             <div className="flex justify-between text-lg font-bold text-emerald-400 pt-1 border-t border-slate-800">
               <span>Total Líquido</span>
               <span>{formatarBRL(totalLiquido)}</span>
@@ -762,19 +773,17 @@ export default function LancarVendaPage() {
 
           {/* OBSERVAÇÃO */}
           <div className="space-y-1.5">
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
-              OBSERVAÇÃO (OPCIONAL)
-            </label>
+            <label className={clsLabel}>OBSERVAÇÃO (OPCIONAL)</label>
             <input
               type="text"
               placeholder="Ex: pagamento combinado para 15/11..."
               value={observacao}
               onChange={(e) => setObservacao(e.target.value)}
-              className="w-full p-3 border border-slate-700 rounded-xl bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+              className={clsModalInput}
             />
             <p className="text-[11px] text-slate-500">
-              O número do orçamento e o desconto importados entram
-              automaticamente na observação do histórico.
+              O número do orçamento e as deduções entram automaticamente na
+              observação do histórico.
             </p>
           </div>
 
