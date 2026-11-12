@@ -23,7 +23,6 @@ interface Venda {
   itens_venda?: ItemVendaDetalhe[];
 }
 
-// Formas de pagamento (códigos gravados no banco):
 // ORCAMENTO = não é venda, não desconta estoque (vira venda pelo botão Converter)
 // "-" = venda real com pagamento não identificado (desconta; identifica depois na edição)
 const FORMAS_PAGAMENTO = [
@@ -76,6 +75,10 @@ export default function VendasPage() {
   const [erro, setErro] = useState<string | null>(null);
   const [filtroBusca, setFiltroBusca] = useState<string>("");
   const [filtroPagamento, setFiltroPagamento] = useState<string>("todos");
+  const [filtroPeriodo, setFiltroPeriodo] = useState<string>("todos");
+  const [mesEspecifico, setMesEspecifico] = useState<string>("");
+  const [dataInicio, setDataInicio] = useState<string>("");
+  const [dataFim, setDataFim] = useState<string>("");
   const [vendaSelecionada, setVendaSelecionada] = useState<Venda | null>(null);
   const [vendaEditando, setVendaEditando] = useState<Venda | null>(null);
   const [editCliente, setEditCliente] = useState("");
@@ -91,17 +94,7 @@ export default function VendasPage() {
       const { data, error } = await supabase
         .from("vendas")
         .select(
-          `
-          *,
-          itens_venda (
-            id,
-            produto_id,
-            quantidade,
-            preco_unitario,
-            subtotal,
-            produtos (nome)
-          )
-        `,
+          `*, itens_venda (id, produto_id, quantidade, preco_unitario, subtotal, produtos (nome))`,
         )
         .order("created_at", { ascending: false });
       if (error) throw error;
@@ -191,7 +184,6 @@ export default function VendasPage() {
       const formaNova = normalizarForma(editPagamento);
       const eraOrcamento = ehOrcamento(formaAnterior);
       const viraOrcamento = ehOrcamento(formaNova);
-
       if (eraOrcamento && !viraOrcamento) {
         const ok = window.confirm(
           "Converter este orçamento em venda?\nO estoque dos itens será DESCONTADO.",
@@ -204,7 +196,6 @@ export default function VendasPage() {
         );
         if (!ok) return;
       }
-
       // 1. Dados gerais (cliente, forma de pagamento, data, observação)
       const { error: erroUpdate } = await supabase
         .from("vendas")
@@ -216,7 +207,6 @@ export default function VendasPage() {
         })
         .eq("id", vendaEditando.id);
       if (erroUpdate) throw erroUpdate;
-
       // 2. Orçamento → venda real: desconta o estoque dos itens
       if (eraOrcamento && !viraOrcamento) {
         for (const item of vendaEditando.itens_venda ?? []) {
@@ -230,7 +220,6 @@ export default function VendasPage() {
         }
         window.alert("Orçamento convertido em venda — estoque descontado.");
       }
-
       // 3. Venda real → orçamento: devolve o estoque dos itens
       if (!eraOrcamento && viraOrcamento) {
         for (const item of vendaEditando.itens_venda ?? []) {
@@ -244,7 +233,6 @@ export default function VendasPage() {
         }
         window.alert("Venda convertida em orçamento — estoque devolvido.");
       }
-
       setVendaEditando(null);
       await carregarVendas();
     } catch (err: unknown) {
@@ -267,14 +255,33 @@ export default function VendasPage() {
       batePagamento =
         normalizarForma(v.forma_pagamento) === normalizarForma(filtroPagamento);
     }
-    return bateBusca && batePagamento;
+    let batePeriodo = true;
+    if (filtroPeriodo !== "todos") {
+      const dataVenda = new Date(v.created_at);
+      if (filtroPeriodo === "mes-corrente") {
+        const agora = new Date();
+        batePeriodo =
+          dataVenda.getFullYear() === agora.getFullYear() &&
+          dataVenda.getMonth() === agora.getMonth();
+      } else if (filtroPeriodo === "mes-especifico" && mesEspecifico) {
+        const [ano, mes] = mesEspecifico.split("-").map(Number);
+        batePeriodo =
+          dataVenda.getFullYear() === ano && dataVenda.getMonth() === mes - 1;
+      } else if (filtroPeriodo === "personalizado") {
+        batePeriodo =
+          !!dataInicio &&
+          !!dataFim &&
+          dataVenda >= new Date(dataInicio + "T00:00:00") &&
+          dataVenda <= new Date(dataFim + "T23:59:59.999");
+      }
+    }
+    return bateBusca && batePagamento && batePeriodo;
   });
 
   // Orçamento não é receita — o faturamento conta só vendas reais
   const totalFaturado = vendasFiltradas
     .filter((v) => !ehOrcamento(v.forma_pagamento))
     .reduce((acc, v) => acc + (v.valor_total || 0), 0);
-
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-6xl mx-auto space-y-6">
@@ -328,6 +335,40 @@ export default function VendasPage() {
               Registo de Transações
             </h2>
             <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+              <select
+                value={filtroPeriodo}
+                onChange={(e) => setFiltroPeriodo(e.target.value)}
+                className="p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none"
+              >
+                <option value="todos">Todo o período</option>
+                <option value="mes-corrente">Mês corrente</option>
+                <option value="mes-especifico">Mês específico</option>
+                <option value="personalizado">Período personalizado</option>
+              </select>
+              {filtroPeriodo === "mes-especifico" && (
+                <input
+                  type="month"
+                  value={mesEspecifico}
+                  onChange={(e) => setMesEspecifico(e.target.value)}
+                  className="p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none"
+                />
+              )}
+              {filtroPeriodo === "personalizado" && (
+                <>
+                  <input
+                    type="date"
+                    value={dataInicio}
+                    onChange={(e) => setDataInicio(e.target.value)}
+                    className="p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none"
+                  />
+                  <input
+                    type="date"
+                    value={dataFim}
+                    onChange={(e) => setDataFim(e.target.value)}
+                    className="p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none"
+                  />
+                </>
+              )}
               <select
                 value={filtroPagamento}
                 onChange={(e) => setFiltroPagamento(e.target.value)}
@@ -582,8 +623,8 @@ export default function VendasPage() {
               {ehOrcamento(vendaEditando.forma_pagamento) && (
                 <div className="p-3 bg-amber-950/40 border border-amber-700/40 text-amber-400 rounded-lg text-xs">
                   💡 Este registro é um <strong>orçamento</strong> (não
-                  descontou estoque). Ao salvar com uma forma de pagamento real
-                  (ou "—"), ele é convertido em venda e o estoque é descontado.
+                  descontou estoque). Ao salvar com forma real (ou "—"),
+                  converte em venda e desconta o estoque.
                 </div>
               )}
               <div>
