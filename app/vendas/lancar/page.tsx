@@ -1,26 +1,51 @@
 "use client";
-
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { registarMovimentacaoEstoque } from "@/lib/estoque";
-// ... (todos os outros imports que existirem, sem pular nenhum) ...
+import {
+  extrairDadosDoPdf,
+  extrairTextoDoPdf,
+  encontrarMelhorProduto,
+  formatarBRL,
+  normalizar,
+  type ProdutoCatalogo,
+} from "@/lib/pdf-orcamento";
 
-// Carrega o worker do pdfjs na inicialização — exigência do pdfjs 6 + Turbopack
-// @ts-expect-error — módulo do worker não tem declarações de tipo
-import("pdfjs-dist/build/pdf.worker.mjs").then((worker) => {
-  (globalThis as unknown as { pdfjsWorker?: unknown }).pdfjsWorker = worker;
-});
+// ============================================================
+// FORMAS DE PAGAMENTO (códigos gravados no banco)
+// ORCAMENTO = não é venda, não desconta estoque.
+//   Vira venda pelo botão "Converter" no Histórico (aí desconta).
+// "-" = venda real com pagamento não identificado (desconta;
+//   a forma real se identifica depois pela Edição no Histórico).
+// ============================================================
+const FORMAS_PAGAMENTO = [
+  "PIX",
+  "CARTAO",
+  "DINHEIRO",
+  "BOLETO",
+  "TRANSFERENCIA",
+  "ORCAMENTO",
+  "-",
+];
+
+const ROTULO_PAGAMENTO: Record<string, string> = {
+  PIX: "PIX",
+  CARTAO: "Cartão",
+  DINHEIRO: "Dinheiro",
+  BOLETO: "Boleto",
+  TRANSFERENCIA: "Transferência",
+  ORCAMENTO: "Orçamento (não desconta estoque)",
+  "-": "— (pagamento não identificado)",
+};
+
+function ehOrcamento(forma: string): boolean {
+  return forma === "ORCAMENTO";
+}
+
 // ============================================================
 // TIPOS
 // ============================================================
-interface Produto {
-  id: string;
-  nome: string;
-  sku?: string | null;
-  estoque_atual: number | null;
-}
-
 interface ItemVenda {
   produtoId: string | null;
   nomePdf: string;
@@ -28,309 +53,9 @@ interface ItemVenda {
   precoUnit: number;
   subtotal: number;
 }
-
 interface Cliente {
   id: string;
   nome: string;
-}
-
-// ============================================================
-// HELPERS DE NÚMERO E TEXTO
-// ============================================================
-function parseNumeroBR(valor: string): number {
-  const limpo = valor.replace(/[^\d.,-]/g, "");
-  if (limpo.includes(",") && limpo.includes(".")) {
-    return Number(limpo.replace(/\./g, "").replace(",", ".")) || 0;
-  }
-  if (limpo.includes(",")) {
-    return Number(limpo.replace(",", ".")) || 0;
-  }
-  if (limpo.includes(".")) {
-    const partes = limpo.split(".");
-    const ultima = partes[partes.length - 1];
-    if (partes.length > 2 || (ultima.length === 3 && limpo.length > 6)) {
-      return Number(limpo.replace(/\./g, "")) || 0;
-    }
-    return Number(limpo) || 0;
-  }
-  return Number(limpo) || 0;
-}
-
-function normalizar(txt: string): string {
-  return txt
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function formatarBRL(valor: number): string {
-  return valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
-
-// ============================================================
-// PARSER DO PDF (formato Orçamento/Dominus e variantes)
-// ============================================================
-interface ItemBruto {
-  nomePdf: string;
-  quantidade: number;
-  precoUnit: number;
-  subtotal: number;
-}
-
-const LINHA_PROIBIDA =
-  /desconto|sub\s?total|total|líquido|liquido|condição|condicao|vendedor|forma de pagamento/i;
-
-function ehDinheiroComCentavos(txt: string): boolean {
-  return /^(?:R\$)?\s*[\d.]+,\d{2}$/.test(txt.trim());
-}
-
-function limparNome(nomeLinha: string): string {
-  return nomeLinha
-    .replace(/^\s*\d{1,4}\s*[-–]\s*/, "") // remove código inicial "1002 - "
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function extrairItensModoLinha(texto: string): ItemBruto[] {
-  const itens: ItemBruto[] = [];
-  // Ordem A: NOME ... QTD ... VALOR ... VALOR
-  const reNomeQtd =
-    /^\s*(?:\d{1,4}\s*[-–]\s*)?(.+?)\s+(\d{1,6})\s+(?:R\$)?\s*([\d.]+,\d{2})\s+(?:R\$)?\s*([\d.]+,\d{2})\s*$/;
-  // Ordem B: QTD ... NOME ... VALOR ... VALOR
-  const reQtdNome =
-    /^\s*(\d{1,6})\s+(.+?)\s+(?:R\$)?\s*([\d.]+,\d{2})\s+(?:R\$)?\s*([\d.]+,\d{2})\s*$/;
-  // Ordem C: QTD VALOR VALOR NOME — nome por último (layout "Orçamento" do WhatsApp)
-  const reQtdValValNome =
-    /^\s*(\d{1,6})\s+(?:R\$)?\s*([\d.]+,\d{2})\s+(?:R\$)?\s*([\d.]+,\d{2})\s+(.+)$/;
-
-  for (const linhaBruta of texto.split("\n")) {
-    const linha = linhaBruta.trim();
-    if (!linha || LINHA_PROIBIDA.test(linha)) continue;
-
-    let nomePdf: string | null = null;
-    let quantidade = 0;
-    let valorA = 0;
-    let valorB = 0;
-
-    const mA = linha.match(reNomeQtd);
-    const mB = mA ? null : linha.match(reQtdNome);
-    const mC = !mA && !mB ? linha.match(reQtdValValNome) : null;
-    if (mA) {
-      nomePdf = limparNome(mA[1]);
-      quantidade = Number(mA[2]);
-      valorA = parseNumeroBR(mA[3]);
-      valorB = parseNumeroBR(mA[4]);
-    } else if (mB) {
-      nomePdf = limparNome(mB[2]);
-      quantidade = Number(mB[1]);
-      valorA = parseNumeroBR(mB[3]);
-      valorB = parseNumeroBR(mB[4]);
-    } else if (mC) {
-      quantidade = Number(mC[1]);
-      valorA = parseNumeroBR(mC[2]);
-      valorB = parseNumeroBR(mC[3]);
-      nomePdf = limparNome(mC[4]);
-    }
-    if (!nomePdf || nomePdf.length < 3 || quantidade <= 0) continue;
-
-    // Descobre qual valor é unitário e qual é subtotal (mesmo com colunas trocadas)
-    let precoUnit = valorA;
-    let subtotal = valorB;
-    const okNormal =
-      Math.abs(quantidade * valorA - valorB) <=
-      Math.max(1, quantidade * valorA * 0.01);
-    const okTrocado =
-      Math.abs(quantidade * valorB - valorA) <=
-      Math.max(1, quantidade * valorB * 0.01);
-    if (okTrocado && !okNormal) {
-      precoUnit = valorB;
-      subtotal = valorA;
-    } else if (!okNormal && !okTrocado) {
-      continue; // valores não batem com a quantidade — não é linha de item
-    }
-    if (precoUnit <= 0) continue;
-    itens.push({ nomePdf, quantidade, precoUnit, subtotal });
-  }
-  return itens;
-}
-
-function extrairItensModoSequencia(texto: string): ItemBruto[] {
-  const itens: ItemBruto[] = [];
-  const linhas = texto
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean);
-  let nomePendente: string | null = null;
-  let qtdPendente: number | null = null;
-  let valor1: number | null = null;
-  let valor2: number | null = null;
-
-  const emitir = () => {
-    if (nomePendente && qtdPendente && valor1 !== null && valor2 !== null) {
-      const nomePdf = limparNome(nomePendente);
-      if (nomePdf && nomePdf.length >= 3) {
-        let precoUnit = valor1;
-        let subtotal = valor2;
-        if (
-          Math.abs(qtdPendente * valor2 - valor1) <=
-          Math.max(1, qtdPendente * valor2 * 0.01)
-        ) {
-          precoUnit = valor2;
-          subtotal = valor1;
-        }
-        itens.push({ nomePdf, quantidade: qtdPendente, precoUnit, subtotal });
-      }
-    }
-    nomePendente = null;
-    qtdPendente = null;
-    valor1 = null;
-    valor2 = null;
-  };
-
-  for (const linha of linhas) {
-    if (LINHA_PROIBIDA.test(linha)) continue;
-    if (ehDinheiroComCentavos(linha)) {
-      const v = parseNumeroBR(linha);
-      if (valor1 === null) valor1 = v;
-      else {
-        valor2 = v;
-        emitir();
-      }
-      continue;
-    }
-    if (/^\d{1,6}$/.test(linha)) {
-      qtdPendente = Number(linha);
-      continue;
-    }
-    if (valor1 !== null || valor2 !== null) {
-      nomePendente = null;
-      qtdPendente = null;
-      valor1 = null;
-      valor2 = null;
-    }
-    const candidato = limparNome(linha);
-    if (candidato.length >= 3 && /[A-Za-zÀ-ÿ]/.test(candidato)) {
-      nomePendente = linha;
-    }
-  }
-  return itens;
-}
-
-function extrairDadosDoPdf(texto: string) {
-  // Itens primeiro (o desconto implícito depende deles)
-  let itens = extrairItensModoLinha(texto);
-  if (itens.length === 0) {
-    itens = extrairItensModoSequencia(texto);
-  }
-
-  // Número do orçamento (ex: "Orçamento 6315")
-  let numeroOrcamento: string | null = null;
-  const mNumero = texto.match(/or[cç]amento\s*(\d{2,6})/i);
-  if (mNumero) numeroOrcamento = mNumero[1];
-
-  // Cliente: linha "Cliente: X" OU a linha seguinte a "Orçamento NNNN data"
-  let clienteNome: string | null = null;
-  const mCliente = texto.match(/cliente[:\s]+([^\n]+)/i);
-  if (mCliente) {
-    clienteNome =
-      mCliente[1]
-        .replace(/cnpj.*$/i, "")
-        .replace(/contato.*$/i, "")
-        .replace(/[-–].*$/, "")
-        .trim()
-        .slice(0, 80) || null;
-  }
-  if (!clienteNome) {
-    const mOrc = texto.match(/or[cç]amento\s*\d{2,6}[^\n]*\n+([^\n]+)/i);
-    if (mOrc) clienteNome = mOrc[1].trim().slice(0, 80) || null;
-  }
-
-  // Data dd/mm/aaaa (mantida como referência — o histórico usa a data de gravação)
-  let dataTexto: string | null = null;
-  const mData = texto.match(/(\d{2}\/\d{2}\/\d{2,4})/);
-  if (mData) dataTexto = mData[1];
-
-  // Desconto explícito ("Desconto: ...")
-  let desconto = 0;
-  const mDesconto = texto.match(/desconto[^\d\n]*([\d.,]+)/i);
-  if (mDesconto) desconto = parseNumeroBR(mDesconto[1]);
-
-  // Desconto implícito: soma dos itens - valor líquido (PDFs sem linha de desconto)
-  if (desconto === 0 && itens.length > 0) {
-    const mLiquido = texto.match(/valor\s+l[ií]quido[^\d\n]*([\d.,]+)/i);
-    if (mLiquido) {
-      const liquido = parseNumeroBR(mLiquido[1]);
-      const bruto = itens.reduce(
-        (s, it) => s + it.quantidade * it.precoUnit,
-        0,
-      );
-      const implicito = Number((bruto - liquido).toFixed(2));
-      if (liquido > 0 && implicito > 0.99 && implicito < bruto) {
-        desconto = implicito;
-      }
-    }
-  }
-
-  return { numeroOrcamento, clienteNome, dataTexto, desconto, itens };
-}
-
-// ============================================================
-// LEITURA DO PDF (pdfjs-dist)
-// ============================================================
-async function extrairTextoDoPdf(arquivo: File): Promise<string> {
-  const pdfjs = await import("pdfjs-dist");
-  // Worker servido do CDN, fixado na versão exata da biblioteca instalada (3.11.174)
-  pdfjs.GlobalWorkerOptions.workerSrc =
-    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-
-  const dados = await arquivo.arrayBuffer();
-  // Worker do pdfjs na thread principal — imune a caminho/404, compatível com Turbopack
-  const globalWorker = globalThis as unknown as { pdfjsWorker?: unknown };
-  if (!globalWorker.pdfjsWorker) {
-    // @ts-expect-error — o módulo do worker não tem declarações de tipo
-    globalWorker.pdfjsWorker = await import("pdfjs-dist/build/pdf.worker.mjs");
-  }
-  const doc = await pdfjs.getDocument({ data: new Uint8Array(dados) }).promise;
-  let texto = "";
-  for (let i = 1; i <= doc.numPages; i++) {
-    const pagina = await doc.getPage(i);
-    const conteudo = await pagina.getTextContent();
-    for (const item of conteudo.items) {
-      const it = item as { str?: string; hasEOL?: boolean };
-      texto += (it.str || "") + (it.hasEOL ? "\n" : " ");
-    }
-    texto += "\n";
-  }
-  return texto;
-}
-
-// ============================================================
-// CASAMENTO PRODUTO DO CATÁLOGO
-// ============================================================
-function encontrarMelhorProduto(
-  nomePdf: string,
-  produtos: Produto[],
-): Produto | null {
-  const alvo = normalizar(nomePdf);
-  const tokens = alvo.split(" ").filter((t) => t.length > 2);
-  if (tokens.length === 0) return null;
-  let melhor: Produto | null = null;
-  let melhorScore = 0;
-  for (const p of produtos) {
-    const nomeP = normalizar(p.nome);
-    let score = 0;
-    for (const t of tokens) {
-      if (nomeP.includes(t)) score++;
-    }
-    if (score === tokens.length) score += 2; // bônus: casou tudo
-    if (score > melhorScore) {
-      melhorScore = score;
-      melhor = p;
-    }
-  }
-  return melhorScore >= 2 ? melhor : null;
 }
 
 // ============================================================
@@ -339,26 +64,22 @@ function encontrarMelhorProduto(
 export default function LancarVendaPage() {
   const router = useRouter();
   const supabase = createClient();
-
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [clienteId, setClienteId] = useState<string>("");
   const [novoClienteNome, setNovoClienteNome] = useState<string>("");
   const [usarNovoCliente, setUsarNovoCliente] = useState<boolean>(false);
   const [clientePdfNome, setClientePdfNome] = useState<string | null>(null);
-
-  const [produtos, setProdutos] = useState<Produto[]>([]);
+  const [produtos, setProdutos] = useState<ProdutoCatalogo[]>([]);
   const [itens, setItens] = useState<ItemVenda[]>([]);
   const [desconto, setDesconto] = useState<number>(0);
   const [formaPagamento, setFormaPagamento] = useState<string>("PIX");
   const [observacao, setObservacao] = useState<string>("");
   const [numeroOrcamento, setNumeroOrcamento] = useState<string | null>(null);
-
   const [buscaProduto, setBuscaProduto] = useState<string>("");
   const [qtdNovoItem, setQtdNovoItem] = useState<number>(1);
   const [precoNovoItem, setPrecoNovoItem] = useState<number>(0);
   const [mostrarDropdown, setMostrarDropdown] = useState<boolean>(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-
   const [importando, setImportando] = useState<boolean>(false);
   const [importInfo, setImportInfo] = useState<string | null>(null);
   const [carregando, setCarregando] = useState<boolean>(false);
@@ -437,7 +158,6 @@ export default function LancarVendaPage() {
       // Depuração: útil se um PDF de layout diferente falhar; pode remover depois
       console.log("[PDF EXTRAÍDO]", texto);
       const dados = extrairDadosDoPdf(texto);
-
       if (dados.itens.length === 0) {
         setImportInfo(
           "O PDF foi lido, mas nenhum item foi reconhecido. Preencha manualmente abaixo.",
@@ -445,7 +165,6 @@ export default function LancarVendaPage() {
         setImportando(false);
         return;
       }
-
       const itensConvertidos: ItemVenda[] = dados.itens.map((it) => ({
         produtoId: encontrarMelhorProduto(it.nomePdf, produtos)?.id ?? null,
         nomePdf: it.nomePdf,
@@ -453,11 +172,9 @@ export default function LancarVendaPage() {
         precoUnit: it.precoUnit,
         subtotal: it.subtotal,
       }));
-
       setItens(itensConvertidos);
       setNumeroOrcamento(dados.numeroOrcamento);
       setClientePdfNome(dados.clienteNome);
-
       // Pré-seleciona o cliente se ele já estiver no cadastro
       if (dados.clienteNome && !usarNovoCliente) {
         const primeiroToken =
@@ -468,7 +185,6 @@ export default function LancarVendaPage() {
         if (encontrado) setClienteId(encontrado.id);
       }
       if (dados.desconto > 0) setDesconto(dados.desconto);
-
       const semMatch = itensConvertidos.filter((i) => !i.produtoId).length;
       setImportInfo(
         `Orçamento ${dados.numeroOrcamento || "—"}${dados.clienteNome ? ` — ${dados.clienteNome}` : ""}: ${itensConvertidos.length} item(ns) identificado(s)${
@@ -488,7 +204,7 @@ export default function LancarVendaPage() {
   };
 
   // ---------- ADIÇÃO MANUAL DE ITEM ----------
-  const adicionarItem = (produto: Produto) => {
+  const adicionarItem = (produto: ProdutoCatalogo) => {
     const existente = itens.find((it) => it.produtoId === produto.id);
     if (existente) {
       setItens(
@@ -556,13 +272,12 @@ export default function LancarVendaPage() {
     setItens(itens.filter((_, i) => i !== index));
   };
 
-  // ---------- CONFIRMAÇÃO DA VENDA ----------
+  // ---------- CONFIRMAÇÃO DA VENDA / ORÇAMENTO ----------
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (carregando) return;
     setErro(null);
     setSucesso(null);
-
     if (itens.length === 0) {
       setErro(
         "Adicione ao menos um item à venda (importando o PDF ou manualmente).",
@@ -581,7 +296,7 @@ export default function LancarVendaPage() {
       );
       return;
     }
-
+    const eOrcamento = ehOrcamento(formaPagamento);
     setCarregando(true);
     try {
       // 1. Resolve o cliente, em ordem de prioridade:
@@ -629,14 +344,12 @@ export default function LancarVendaPage() {
           }
         }
       }
-
       // 2. Monta a observação com os dados do orçamento (visível e filtrável no histórico)
       const partesObs: string[] = [];
       if (numeroOrcamento) partesObs.push(`Orçamento ${numeroOrcamento}`);
       if (desconto > 0) partesObs.push(`Desconto ${formatarBRL(desconto)}`);
       if (observacao.trim()) partesObs.push(observacao.trim());
       const observacaoFinal = partesObs.join(" | ") || null;
-
       // 3. Grava a venda nas colunas que o Histórico de Vendas lê
       const { data: vendaCriada, error: erroVenda } = await supabase
         .from("vendas")
@@ -650,7 +363,6 @@ export default function LancarVendaPage() {
         .single();
       if (erroVenda) throw erroVenda;
       const vendaId = vendaCriada.id;
-
       // 4. Grava os itens
       const linhasItens = itens.map((it) => ({
         venda_id: vendaId,
@@ -663,20 +375,22 @@ export default function LancarVendaPage() {
         .from("itens_venda")
         .insert(linhasItens);
       if (erroItens) throw erroItens;
-
-      // 5. Desconta o estoque de cada item (produto final — sem efeito em insumos)
-      for (const it of itens) {
-        await registarMovimentacaoEstoque({
-          produtoId: it.produtoId as string,
-          tipo: "VENDA",
-          quantidade: it.quantidade,
-          observacao: `Venda #${String(vendaId).slice(0, 8)} — ${clienteFinalNome}`,
-          sincronizarVelcro: false,
-        });
+      // 5. Desconta o estoque de cada item — EXCETO quando é orçamento
+      if (!eOrcamento) {
+        for (const it of itens) {
+          await registarMovimentacaoEstoque({
+            produtoId: it.produtoId as string,
+            tipo: "VENDA",
+            quantidade: it.quantidade,
+            observacao: `Venda #${String(vendaId).slice(0, 8)} — ${clienteFinalNome}`,
+            sincronizarVelcro: false,
+          });
+        }
       }
-
       setSucesso(
-        `Venda registrada para ${clienteFinalNome}: ${itens.length} item(ns), total ${formatarBRL(totalLiquido)}. Estoque atualizado.`,
+        eOrcamento
+          ? `Orçamento registrado para ${clienteFinalNome}: ${itens.length} item(ns), total ${formatarBRL(totalLiquido)}. Estoque NÃO descontado — use "Converter" no Histórico para virar venda.`
+          : `Venda registrada para ${clienteFinalNome}: ${itens.length} item(ns), total ${formatarBRL(totalLiquido)}. Estoque atualizado.`,
       );
       setItens([]);
       setDesconto(0);
@@ -833,11 +547,11 @@ export default function LancarVendaPage() {
                 onChange={(e) => setFormaPagamento(e.target.value)}
                 className="w-full p-3 border border-slate-700 rounded-xl bg-slate-950 text-slate-100 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
               >
-                <option value="PIX">PIX</option>
-                <option value="CARTAO">Cartão</option>
-                <option value="DINHEIRO">Dinheiro</option>
-                <option value="BOLETO">Boleto</option>
-                <option value="TRANSFERENCIA">Transferência</option>
+                {FORMAS_PAGAMENTO.map((f) => (
+                  <option key={f} value={f}>
+                    {ROTULO_PAGAMENTO[f]}
+                  </option>
+                ))}
               </select>
             </div>
             <div className="space-y-1.5">
@@ -854,6 +568,13 @@ export default function LancarVendaPage() {
               />
             </div>
           </div>
+          {ehOrcamento(formaPagamento) && (
+            <div className="p-3 border border-amber-500/30 bg-amber-950/40 text-amber-400 rounded-xl text-xs">
+              💡 Orçamento não desconta estoque. Para virar venda, use o botão
+              "Converter" no Histórico de Vendas — aí sim o estoque é
+              descontado.
+            </div>
+          )}
 
           {/* PESQUISA DE PRODUTOS (ADICIONAR MANUAL) */}
           <div className="space-y-1.5 relative" ref={dropdownRef}>
@@ -1060,11 +781,17 @@ export default function LancarVendaPage() {
           <button
             type="submit"
             disabled={carregando || itens.length === 0 || itensSemProduto > 0}
-            className="w-full py-3.5 text-sm font-bold bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-all shadow-lg shadow-blue-950 disabled:opacity-50 cursor-pointer"
+            className={
+              ehOrcamento(formaPagamento)
+                ? "w-full py-3.5 text-sm font-bold bg-amber-600 hover:bg-amber-500 text-white rounded-xl transition-all shadow-lg shadow-amber-950 disabled:opacity-50 cursor-pointer"
+                : "w-full py-3.5 text-sm font-bold bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-all shadow-lg shadow-blue-950 disabled:opacity-50 cursor-pointer"
+            }
           >
             {carregando
-              ? "Registrando venda..."
-              : "Confirmar Venda e Descontar Estoque"}
+              ? "Registrando..."
+              : ehOrcamento(formaPagamento)
+                ? "Confirmar Orçamento (não desconta estoque)"
+                : "Confirmar Venda e Descontar Estoque"}
           </button>
         </form>
       </div>
