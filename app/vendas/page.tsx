@@ -68,6 +68,8 @@ function toInputData(iso: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// Coluna de pagamento oculta na UI (o dado continua no banco: orçamento depende dele)
+const MOSTRAR_COLUNA_PAGAMENTO = false;
 export default function VendasPage() {
   const supabase = createClient();
   const [vendas, setVendas] = useState<Venda[]>([]);
@@ -440,10 +442,12 @@ export default function VendasPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="border-b border-slate-800 bg-slate-950/50 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                                    <tr className="border-b border-slate-800 bg-slate-950/50 text-xs font-bold text-slate-400 uppercase tracking-wider">
                     <th className="p-3.5">Data</th>
                     <th className="p-3.5">Cliente</th>
-                    <th className="p-3.5">Pagamento</th>
+                    {MOSTRAR_COLUNA_PAGAMENTO && (
+                      <th className="p-3.5">Pagamento</th>
+                    )}
                     <th className="p-3.5">Observação / Itens</th>
                     <th className="p-3.5 text-right">Valor Total</th>
                     <th className="p-3.5 text-center">Ações</th>
@@ -453,7 +457,7 @@ export default function VendasPage() {
                   {vendasFiltradas.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={6}
+                        colSpan={MOSTRAR_COLUNA_PAGAMENTO ? 6 : 5}
                         className="text-center p-8 text-slate-500"
                       >
                         Nenhuma venda encontrada.
@@ -471,19 +475,21 @@ export default function VendasPage() {
                         <td className="p-3.5 font-semibold text-white">
                           {venda.cliente}
                         </td>
-                        <td className="p-3.5">
-                          <span
-                            className={`px-2.5 py-1 rounded border text-xs font-semibold ${
-                              ehOrcamento(venda.forma_pagamento)
-                                ? "bg-amber-950/60 border-amber-700/50 text-amber-400"
-                                : venda.forma_pagamento === "-"
-                                  ? "bg-slate-800 border-slate-600 text-slate-400 italic"
-                                  : "bg-slate-800 border-slate-700 text-slate-300"
-                            }`}
-                          >
-                            {rotuloPagamento(venda.forma_pagamento)}
-                          </span>
-                        </td>
+                        {MOSTRAR_COLUNA_PAGAMENTO && (
+                          <td className="p-3.5">
+                            <span
+                              className={`px-2.5 py-1 rounded border text-xs font-semibold ${
+                                ehOrcamento(venda.forma_pagamento)
+                                  ? "bg-amber-950/60 border-amber-700/50 text-amber-400"
+                                  : venda.forma_pagamento === "-"
+                                    ? "bg-slate-800 border-slate-600 text-slate-400 italic"
+                                    : "bg-slate-800 border-slate-700 text-slate-300"
+                              }`}
+                            >
+                              {rotuloPagamento(venda.forma_pagamento)}
+                            </span>
+                          </td>
+                        )}
                         <td
                           className="p-3.5 text-slate-300 max-w-xs truncate"
                           title={venda.observacao || ""}
