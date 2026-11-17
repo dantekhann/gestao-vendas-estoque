@@ -1,175 +1,244 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
+import { createClient } from '@/lib/supabase/client';
+import { formatarData } from '@/lib/formatters';
 
-interface ItemDia {
+const PREFIXO_CONSUMO = 'CONSUMO_PRODUCAO';
+
+interface Produto {
+  id: string;
   nome: string;
+  estoque_atual?: number;
+}
+
+interface Movimentacao {
+  id: string;
+  produto_id: string;
+  tipo: string;
   quantidade: number;
+  observacao?: string | null;
+  created_at: string;
+  produtos?: Produto | Produto[] | null;
 }
 
-interface DiaHistorico {
-  chave: string; // "2026-10-19"
-  data: string;  // "dom, 19/10"
-  itens: ItemDia[];
-  total: number;
+type FiltroTipo = 'TODOS' | 'ENTRADA' | 'SAIDA' | 'VENDA' | 'AJUSTE' | 'CONSUMO';
+
+function produtoDe(m: Movimentacao): Produto | null {
+  if (Array.isArray(m.produtos)) return m.produtos[0] ?? null;
+  return m.produtos ?? null;
 }
 
-function formatarDia(chave: string): string {
-  const [ano, mes, dia] = chave.split("-").map(Number);
-  return new Date(ano, mes - 1, dia).toLocaleDateString("pt-BR", {
-    weekday: "short",
-    day: "2-digit",
-    month: "2-digit",
-  });
+function ehConsumo(m: Movimentacao): boolean {
+  return (m.observacao ?? '').startsWith(PREFIXO_CONSUMO);
 }
 
-export default function HistoricoProducao() {
-  const [dias, setDias] = useState<DiaHistorico[]>([]);
-  const [carregando, setCarregando] = useState(true);
+function unidadeDe(nome: string): 'g' | 'un' {
+  return nome.toLowerCase().includes('granel') ? 'g' : 'un';
+}
+
+export default function MovimentacoesPage() {
+  const supabase = createClient();
+  const [movimentacoes, setMovimentacoes] = useState<Movimentacao[]>([]);
+  const [carregando, setCarregando] = useState<boolean>(true);
   const [erro, setErro] = useState<string | null>(null);
+  const [filtroTipo, setFiltroTipo] = useState<FiltroTipo>('TODOS');
+  const [filtroBusca, setFiltroBusca] = useState<string>('');
+
+  const carregarMovimentacoes = useCallback(async () => {
+    try {
+      setCarregando(true);
+      setErro(null);
+
+      const { data, error } = await supabase
+        .from('movimentacoes_estoque')
+        .select('*, produtos (id, nome, estoque_atual)')
+        .order('created_at', { ascending: false })
+        .range(0, 199);
+
+      if (error) throw error;
+      if (data) setMovimentacoes(data as Movimentacao[]);
+    } catch (err: unknown) {
+      const errorObj = err as { message?: string };
+      setErro(errorObj?.message || 'Erro ao carregar movimentações.');
+    } finally {
+      setCarregando(false);
+    }
+  }, [supabase]);
 
   useEffect(() => {
-    const supabase = createClient();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    carregarMovimentacoes();
+  }, [carregarMovimentacoes]);
 
-    async function carregar() {
-      try {
-        const seteDiasAtras = new Date();
-        seteDiasAtras.setDate(seteDiasAtras.getDate() - 6);
-        seteDiasAtras.setHours(0, 0, 0, 0);
+  const termo = filtroBusca.toLowerCase().trim();
 
-        const [resProdutos, resMetas, resMovs] = await Promise.all([
-          supabase.from("produtos").select("id, nome"),
-          supabase.from("metas_producao").select("produto_id"),
-          supabase.from("movimentacoes_estoque").select("*"),
-        ]);
+  const movimentacoesFiltradas = movimentacoes.filter((m) => {
+    const nomeProduto = produtoDe(m)?.nome ?? '';
+    const obs = m.observacao ?? '';
 
-        if (resProdutos.error) throw resProdutos.error;
-        if (resMetas.error) throw resMetas.error;
-        if (resMovs.error) throw resMovs.error;
+    const bateBusca =
+      !termo ||
+      nomeProduto.toLowerCase().includes(termo) ||
+      obs.toLowerCase().includes(termo);
 
-        const nomePorId = new Map<string, string>();
-        for (const p of (resProdutos.data ?? []) as Record<string, unknown>[]) {
-          nomePorId.set(String(p.id), String(p.nome ?? "Produto"));
-        }
+    const bateTipo =
+      filtroTipo === 'TODOS' ||
+      (filtroTipo === 'CONSUMO' ? ehConsumo(m) : m.tipo === filtroTipo);
 
-        // Mesma regra do relatório: produção = produto que tem meta
-        const idsComMeta = new Set(
-          ((resMetas.data ?? []) as Record<string, unknown>[]).map((m) =>
-            String(m.produto_id)
-          )
-        );
+    return bateBusca && bateTipo;
+  });
 
-        // Agrupa por dia → produto
-        const porDia = new Map<string, Map<string, number>>();
-
-        for (const mov of (resMovs.data ?? []) as Record<string, unknown>[]) {
-          let data: Date | null = null;
-          for (const campo of ["created_at", "criado_em", "data", "data_movimentacao"]) {
-            const valor = mov[campo];
-            if (valor) {
-              const d = new Date(String(valor));
-              if (!Number.isNaN(d.getTime())) {
-                data = d;
-                break;
-              }
-            }
-          }
-          if (!data || data < seteDiasAtras) continue;
-
-          const tipo = String(mov.tipo ?? "").toUpperCase();
-          if (!tipo.includes("ENTRADA")) continue;
-
-          const id = String(mov.produto_id);
-          if (!idsComMeta.has(id)) continue;
-
-          // Estorno de venda excluída não é produção
-          const obs = String(mov.observacao ?? "").toLowerCase();
-          if (obs.includes("estorno")) continue;
-
-          const qtd = Number(mov.quantidade) || 0;
-
-          const chave = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, "0")}-${String(data.getDate()).padStart(2, "0")}`;
-          if (!porDia.has(chave)) porDia.set(chave, new Map());
-          const produtosDoDia = porDia.get(chave)!;
-          produtosDoDia.set(id, (produtosDoDia.get(id) ?? 0) + qtd);
-        }
-
-        const lista: DiaHistorico[] = [...porDia.entries()]
-          .map(([chave, produtos]) => {
-            const itens = [...produtos.entries()].map(([id, quantidade]) => ({
-              nome: nomePorId.get(id) ?? "Produto",
-              quantidade,
-            }));
-            return {
-              chave,
-              data: formatarDia(chave),
-              itens,
-              total: itens.reduce((s, i) => s + i.quantidade, 0),
-            };
-          })
-          .sort((a, b) => b.chave.localeCompare(a.chave)); // mais recente primeiro
-
-        setDias(lista);
-      } catch (err) {
-        setErro(err instanceof Error ? err.message : "desconhecido");
-      } finally {
-        setCarregando(false);
-      }
-    }
-
-    void carregar();
-  }, []);
-
-  if (carregando) {
-    return (
-      <section className="rounded-xl border border-slate-800 bg-slate-900 p-5 shadow-lg">
-        <p className="text-sm text-slate-500">Carregando histórico…</p>
-      </section>
-    );
-  }
-
-  const totalSemana = dias.reduce((s, d) => s + d.total, 0);
+  // Total de tabaco granel consumido na produção (no filtro atual, em gramas)
+  const tabacoConsumidoG = movimentacoesFiltradas
+    .filter((m) => ehConsumo(m) && unidadeDe(produtoDe(m)?.nome ?? '') === 'g')
+    .reduce((soma, m) => soma + Number(m.quantidade || 0), 0);
 
   return (
-    <section className="rounded-xl border border-slate-800 bg-slate-900 p-5 shadow-lg">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
-        📅 Produção — últimos 7 dias
-      </h2>
+    <div className="min-h-screen bg-slate-950 text-slate-100 py-8 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-6xl mx-auto space-y-6">
 
-      {erro && <p className="mt-2 text-sm text-red-300">Erro ao carregar: {erro}</p>}
-
-      {!erro && dias.length === 0 && (
-        <p className="mt-2 text-sm text-slate-500">
-          Nenhuma produção nos últimos 7 dias.
-        </p>
-      )}
-
-      <div className="mt-3 space-y-3">
-        {dias.map((dia) => (
-          <div
-            key={dia.chave}
-            className="rounded-lg border border-slate-800 bg-slate-950/60 p-3"
-          >
-            <p className="text-sm font-semibold text-slate-200">
-              {dia.data} — {dia.total.toLocaleString("pt-BR")} un.
-            </p>
-            <ul className="mt-1 space-y-0.5">
-              {dia.itens.map((item) => (
-                <li key={item.nome} className="text-xs text-slate-400">
-                  • {item.nome}: {item.quantidade.toLocaleString("pt-BR")} un.
-                </li>
-              ))}
-            </ul>
+        {/* Cabeçalho */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900 p-5 rounded-xl border border-slate-800 shadow-md">
+          <div>
+            <h1 className="text-2xl font-bold text-white">Histórico de Movimentações de Stock</h1>
+            <p className="text-sm text-slate-400">Registo de entradas, saídas, vendas, consumo de produção e ajustes - OrC Brasil</p>
           </div>
-        ))}
-      </div>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/movimentar"
+              className="px-4 py-2 text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-500 rounded-lg transition-colors shadow-sm"
+            >
+              + Novo Lançamento
+            </Link>
+            <Link
+              href="/produtos"
+              className="px-4 py-2 text-sm font-medium bg-slate-800 text-slate-200 hover:bg-slate-700 rounded-lg transition-colors border border-slate-700"
+            >
+              ← Gestão de Produtos
+            </Link>
+          </div>
+        </div>
 
-      {totalSemana > 0 && (
-        <p className="mt-3 border-t border-slate-800 pt-3 text-sm font-bold text-amber-400">
-          Total dos últimos 7 dias: {totalSemana.toLocaleString("pt-BR")} un.
-        </p>
-      )}
-    </section>
+        {/* Filtros */}
+        <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 shadow-md flex flex-col sm:flex-row justify-between gap-3">
+          <input
+            type="text"
+            placeholder="Pesquisar por produto ou observação..."
+            value={filtroBusca}
+            onChange={(e) => setFiltroBusca(e.target.value)}
+            className="p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none w-full sm:w-80"
+          />
+          <div className="flex gap-2 w-full sm:w-auto">
+            <select
+              value={filtroTipo}
+              onChange={(e) => setFiltroTipo(e.target.value as FiltroTipo)}
+              className="p-2.5 border border-slate-700 rounded-lg bg-slate-950 text-slate-100 text-sm outline-none w-full sm:w-auto"
+            >
+              <option value="TODOS">Todos os Tipos</option>
+              <option value="ENTRADA">ENTRADA</option>
+              <option value="SAIDA">SAÍDA</option>
+              <option value="VENDA">VENDA</option>
+              <option value="AJUSTE">AJUSTE</option>
+              <option value="CONSUMO">CONSUMO DE PRODUÇÃO</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Resumo do consumo de tabaco */}
+        {tabacoConsumidoG > 0 && (
+          <div className="bg-violet-950/40 p-4 rounded-xl border border-violet-800 text-sm text-violet-200">
+            Tabaco granel consumido na produção (filtro atual):{' '}
+            <strong>{tabacoConsumidoG.toLocaleString('pt-BR')} g</strong>{' '}
+            ({(tabacoConsumidoG / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 3 })} kg)
+          </div>
+        )}
+
+        {/* Erro se houver */}
+        {erro && (
+          <div className="p-4 bg-rose-950/60 border border-rose-800 text-rose-300 rounded-lg text-sm">
+            {erro}
+          </div>
+        )}
+
+        {/* Tabela */}
+        <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-md space-y-4">
+          <h2 className="text-sm font-semibold tracking-wider text-slate-400 uppercase">
+            Registo de Movimentos ({movimentacoesFiltradas.length} itens)
+          </h2>
+
+          {carregando ? (
+            <div className="p-8 text-center text-slate-400 animate-pulse bg-slate-950/50 rounded-lg border border-slate-800">
+              A carregar histórico...
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-800 bg-slate-950/50 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                    <th className="p-3.5">Data / Hora</th>
+                    <th className="p-3.5">Item / Produto</th>
+                    <th className="p-3.5 text-center">Tipo</th>
+                    <th className="p-3.5 text-center">Quantidade</th>
+                    <th className="p-3.5">Observação</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 text-sm">
+                  {movimentacoesFiltradas.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="text-center p-6 text-slate-500">
+                        Nenhuma movimentação registada.
+                      </td>
+                    </tr>
+                  ) : (
+                    movimentacoesFiltradas.map((m) => {
+                      const nomeProduto = produtoDe(m)?.nome || 'Produto Desconhecido';
+                      const unidade = unidadeDe(nomeProduto);
+                      const consumo = ehConsumo(m);
+
+                      const badgeTipo = consumo
+                        ? 'bg-violet-950/60 border-violet-800 text-violet-300'
+                        : m.tipo === 'ENTRADA'
+                          ? 'bg-emerald-950/60 border-emerald-800 text-emerald-400'
+                          : m.tipo === 'VENDA'
+                            ? 'bg-blue-950/60 border-blue-800 text-blue-400'
+                            : m.tipo === 'AJUSTE'
+                              ? 'bg-amber-950/60 border-amber-800 text-amber-400'
+                              : 'bg-rose-950/60 border-rose-800 text-rose-400';
+
+                      const rotuloTipo = consumo ? 'CONSUMO' : m.tipo;
+                      const sinal = m.tipo === 'ENTRADA' ? '+' : '-';
+
+                      return (
+                        <tr key={m.id} className="hover:bg-slate-800/40 transition-colors">
+                          <td className="p-3.5 text-slate-300 whitespace-nowrap">
+                            {formatarData(m.created_at)}
+                          </td>
+                          <td className="p-3.5 font-semibold text-slate-100">{nomeProduto}</td>
+                          <td className="p-3.5 text-center">
+                            <span className={`px-2.5 py-1 rounded border text-xs font-semibold ${badgeTipo}`}>
+                              {rotuloTipo}
+                            </span>
+                          </td>
+                          <td className="p-3.5 text-center font-bold text-white whitespace-nowrap">
+                            {sinal}
+                            {Number(m.quantidade).toLocaleString('pt-BR')} {unidade}
+                          </td>
+                          <td className="p-3.5 text-slate-400 text-xs">
+                            {m.observacao || '—'}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+      </div>
+    </div>
   );
 }

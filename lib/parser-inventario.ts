@@ -118,7 +118,8 @@ function normalizar(s: string): string {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\([^)]*\)/g, " ") // remove (mL), (pares), (%)
+    .replace(/^\s*\d{2,6}\s*[-–]\s*/, "") // remove código do início: "1000 - Yerba..."
+    .replace(/[()]/g, " ")                 // mantém o conteúdo: "(Display)" vira "display"
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();

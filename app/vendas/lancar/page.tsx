@@ -1,4 +1,5 @@
 "use client";
+
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -23,6 +24,7 @@ const FORMAS_PAGAMENTO = [
   "ORCAMENTO",
   "-",
 ];
+
 const ROTULO_PAGAMENTO: Record<string, string> = {
   PIX: "PIX",
   CARTAO: "Cartão",
@@ -32,6 +34,7 @@ const ROTULO_PAGAMENTO: Record<string, string> = {
   ORCAMENTO: "Orçamento (não desconta estoque)",
   "-": "— (pagamento não identificado)",
 };
+
 function ehOrcamento(forma: string): boolean {
   return forma === "ORCAMENTO";
 }
@@ -53,20 +56,28 @@ interface ItemVenda {
   precoUnit: number;
   subtotal: number;
 }
+
 interface Cliente {
   id: string;
   nome: string;
 }
 
+// Catálogo completo (ativos e ocultos) usado no casamento com o PDF
+type ProdutoComStatus = ProdutoCatalogo & { ativo: boolean };
+
 export default function LancarVendaPage() {
   const router = useRouter();
   const supabase = createClient();
+
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [clienteId, setClienteId] = useState<string>("");
   const [novoClienteNome, setNovoClienteNome] = useState<string>("");
   const [usarNovoCliente, setUsarNovoCliente] = useState<boolean>(false);
   const [clientePdfNome, setClientePdfNome] = useState<string | null>(null);
-  const [produtos, setProdutos] = useState<ProdutoCatalogo[]>([]);
+
+  // Todos os produtos (inclui ocultos) para o casamento com o PDF
+  const [catalogo, setCatalogo] = useState<ProdutoComStatus[]>([]);
+
   const [itens, setItens] = useState<ItemVenda[]>([]);
   const [desconto, setDesconto] = useState<number>(0);
   const [tarifa, setTarifa] = useState<number>(0);
@@ -74,11 +85,13 @@ export default function LancarVendaPage() {
   const [formaPagamento, setFormaPagamento] = useState<string>("PIX");
   const [observacao, setObservacao] = useState<string>("");
   const [numeroOrcamento, setNumeroOrcamento] = useState<string | null>(null);
+
   const [buscaProduto, setBuscaProduto] = useState<string>("");
   const [qtdNovoItem, setQtdNovoItem] = useState<number>(1);
   const [precoNovoItem, setPrecoNovoItem] = useState<number>(0);
   const [mostrarDropdown, setMostrarDropdown] = useState<boolean>(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
   const [importando, setImportando] = useState<boolean>(false);
   const [importInfo, setImportInfo] = useState<string | null>(null);
   const [carregando, setCarregando] = useState<boolean>(false);
@@ -97,15 +110,26 @@ export default function LancarVendaPage() {
           .order("nome", { ascending: true }),
         supabase
           .from("produtos")
-          .select("id, nome, sku, estoque_atual")
-          .eq("ativo", true)
+          .select("id, nome, sku, estoque_atual, ativo")
           .order("nome", { ascending: true }),
       ]);
+
       if (errClientes)
         console.warn("Tabela clientes indisponível:", errClientes.message);
       if (dataClientes) setClientes(dataClientes);
+
       if (errProdutos) throw errProdutos;
-      if (dataProdutos) setProdutos(dataProdutos);
+      if (dataProdutos) {
+        setCatalogo(
+          dataProdutos.map((p) => ({
+            id: p.id as string,
+            nome: p.nome as string,
+            sku: (p.sku as string | null) ?? null,
+            estoque_atual: (p.estoque_atual as number | null) ?? null,
+            ativo: Boolean(p.ativo),
+          })),
+        );
+      }
     } catch (err: unknown) {
       const e = err as { message?: string };
       setErro(e?.message || "Erro ao carregar clientes/produtos.");
@@ -118,6 +142,7 @@ export default function LancarVendaPage() {
       if (isMounted) await carregarDados();
     }
     init();
+
     function handleClickOutside(event: MouseEvent) {
       if (
         dropdownRef.current &&
@@ -133,7 +158,9 @@ export default function LancarVendaPage() {
     };
   }, [carregarDados]);
 
-  const produtosFiltrados = produtos.filter(
+  // Dropdown de seleção: só produtos ativos
+  const produtosAtivos = catalogo.filter((p) => p.ativo);
+  const produtosFiltrados = produtosAtivos.filter(
     (p) =>
       p.nome.toLowerCase().includes(buscaProduto.toLowerCase()) ||
       (p.sku && p.sku.toLowerCase().includes(buscaProduto.toLowerCase())),
@@ -149,13 +176,15 @@ export default function LancarVendaPage() {
   ) => {
     const arquivo = event.target.files?.[0];
     if (!arquivo) return;
+
     setImportando(true);
     setErro(null);
     setImportInfo(null);
+
     try {
       const texto = await extrairTextoDoPdf(arquivo);
-      console.log("[PDF EXTRAÍDO]", texto);
       const dados = extrairDadosDoPdf(texto);
+
       if (dados.itens.length === 0) {
         setImportInfo(
           "O PDF foi lido, mas nenhum item foi reconhecido. Preencha manualmente abaixo.",
@@ -163,16 +192,19 @@ export default function LancarVendaPage() {
         setImportando(false);
         return;
       }
+
       const itensConvertidos: ItemVenda[] = dados.itens.map((it) => ({
-        produtoId: encontrarMelhorProduto(it.nomePdf, produtos)?.id ?? null,
+        produtoId: encontrarMelhorProduto(it.nomePdf, catalogo)?.id ?? null,
         nomePdf: it.nomePdf,
         quantidade: it.quantidade,
         precoUnit: it.precoUnit,
         subtotal: it.subtotal,
       }));
+
       setItens(itensConvertidos);
       setNumeroOrcamento(dados.numeroOrcamento);
       setClientePdfNome(dados.clienteNome);
+
       // Pré-seleciona o cliente se ele já estiver no cadastro
       if (dados.clienteNome && !usarNovoCliente) {
         const primeiroToken =
@@ -182,11 +214,14 @@ export default function LancarVendaPage() {
         );
         if (encontrado) setClienteId(encontrado.id);
       }
-      if (dados.desconto > 0) setDesconto(dados.desconto);
-      if (dados.desconto > 0) setDesconto(dados.desconto);
-      if (dados.tarifa > 0) setTarifa(dados.tarifa);
-      if (dados.frete > 0) setFrete(dados.frete);
+
+      // Sempre atualiza deduções: se o PDF não trouxer, zera (evita valor de importação anterior)
+      setDesconto(dados.desconto);
+      setTarifa(dados.tarifa);
+      setFrete(dados.frete);
+
       if (dados.obsAuto && !observacao.trim()) setObservacao(dados.obsAuto);
+
       const semMatch = itensConvertidos.filter((i) => !i.produtoId).length;
       setImportInfo(
         `Orçamento ${dados.numeroOrcamento || "—"}${dados.clienteNome ? ` — ${dados.clienteNome}` : ""}: ${itensConvertidos.length} item(ns) identificado(s)${
@@ -201,6 +236,7 @@ export default function LancarVendaPage() {
         `Falha ao ler o PDF: ${e?.message || "erro desconhecido"}. Preencha manualmente.`,
       );
     }
+
     setImportando(false);
     event.target.value = "";
   };
@@ -208,6 +244,7 @@ export default function LancarVendaPage() {
   // ---------- ADIÇÃO MANUAL DE ITEM ----------
   const adicionarItem = (produto: ProdutoCatalogo) => {
     const existente = itens.find((it) => it.produtoId === produto.id);
+
     if (existente) {
       setItens(
         itens.map((it) =>
@@ -232,6 +269,7 @@ export default function LancarVendaPage() {
         },
       ]);
     }
+
     setBuscaProduto("");
     setQtdNovoItem(1);
     setPrecoNovoItem(0);
@@ -260,7 +298,7 @@ export default function LancarVendaPage() {
   };
 
   const atribuirProduto = (index: number, produtoId: string) => {
-    const produto = produtos.find((p) => p.id === produtoId);
+    const produto = catalogo.find((p) => p.id === produtoId);
     setItens(
       itens.map((it, i) =>
         i === index
@@ -278,8 +316,10 @@ export default function LancarVendaPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (carregando) return;
+
     setErro(null);
     setSucesso(null);
+
     if (itens.length === 0) {
       setErro(
         "Adicione ao menos um item à venda (importando o PDF ou manualmente).",
@@ -298,11 +338,14 @@ export default function LancarVendaPage() {
       );
       return;
     }
+
     const eOrcamento = ehOrcamento(formaPagamento);
     setCarregando(true);
+
     try {
       // 1. Resolve o cliente: digitado > selecionado na lista > nome do PDF (cadastra sozinho)
       let clienteFinalNome = "Cliente Avulso";
+
       if (usarNovoCliente && novoClienteNome.trim()) {
         clienteFinalNome = novoClienteNome.trim();
         const { error: errNovoCli } = await supabase
@@ -324,6 +367,7 @@ export default function LancarVendaPage() {
           .select("id, nome")
           .eq("nome", clienteFinalNome)
           .maybeSingle();
+
         if (cliExistente) {
           clienteFinalNome = cliExistente.nome;
         } else {
@@ -332,6 +376,7 @@ export default function LancarVendaPage() {
             .insert({ nome: clienteFinalNome })
             .select("id, nome")
             .single();
+
           if (errPdfCli) {
             console.warn(
               "Cliente do PDF não cadastrado (a venda segue com o nome):",
@@ -344,13 +389,14 @@ export default function LancarVendaPage() {
           }
         }
       }
+
       // 2. Observação com orçamento e deduções (visível e filtrável no histórico)
       const partesObs: string[] = [];
       if (numeroOrcamento) partesObs.push(`Orçamento ${numeroOrcamento}`);
       if (desconto > 0) partesObs.push(`Desconto ${formatarBRL(desconto)}`);
-
       if (observacao.trim()) partesObs.push(observacao.trim());
       const observacaoFinal = partesObs.join(" | ") || null;
+
       // 3. Grava a venda
       const { data: vendaCriada, error: erroVenda } = await supabase
         .from("vendas")
@@ -362,8 +408,10 @@ export default function LancarVendaPage() {
         })
         .select("id")
         .single();
+
       if (erroVenda) throw erroVenda;
       const vendaId = vendaCriada.id;
+
       // 4. Grava os itens
       const linhasItens = itens.map((it) => ({
         venda_id: vendaId,
@@ -372,10 +420,12 @@ export default function LancarVendaPage() {
         preco_unitario: it.precoUnit,
         subtotal: it.subtotal,
       }));
+
       const { error: erroItens } = await supabase
         .from("itens_venda")
         .insert(linhasItens);
       if (erroItens) throw erroItens;
+
       // 5. Desconta o estoque — EXCETO quando é orçamento
       if (!eOrcamento) {
         for (const it of itens) {
@@ -388,11 +438,13 @@ export default function LancarVendaPage() {
           });
         }
       }
+
       setSucesso(
         eOrcamento
           ? `Orçamento registrado para ${clienteFinalNome}: ${itens.length} item(ns), total ${formatarBRL(totalLiquido)}. Estoque NÃO descontado — use "Converter" no Histórico para virar venda.`
           : `Venda registrada para ${clienteFinalNome}: ${itens.length} item(ns), total ${formatarBRL(totalLiquido)}. Estoque atualizado.`,
       );
+
       setItens([]);
       setDesconto(0);
       setTarifa(0);
@@ -419,6 +471,7 @@ export default function LancarVendaPage() {
       console.error("Erro ao registrar venda [completo]:", err);
       setErro(`Erro ao registrar a venda — ${detalhe}`);
     }
+
     setCarregando(false);
   };
 
@@ -434,9 +487,7 @@ export default function LancarVendaPage() {
       <div className="max-w-2xl w-full space-y-6">
         <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-xl flex justify-between items-center">
           <div>
-            <h1 className="text-2xl font-bold text-white">
-              Registar Nova Venda
-            </h1>
+            <h1 className="text-2xl font-bold text-white">Registar Nova Venda</h1>
             <p className="text-xs text-slate-400 mt-1">
               OrC Brasil - Controle Comercial
             </p>
@@ -459,6 +510,7 @@ export default function LancarVendaPage() {
               {erro}
             </div>
           )}
+
           {sucesso && (
             <div className="p-3.5 border border-emerald-500/30 bg-emerald-950/50 text-emerald-400 rounded-xl text-sm">
               ✅ {sucesso}
@@ -545,13 +597,11 @@ export default function LancarVendaPage() {
 
           {/* 2. PESQUISA E SELEÇÃO DE PRODUTOS */}
           <div className="space-y-1.5 relative" ref={dropdownRef}>
-            <label className={clsLabel}>
-              2. PESQUISA E SELEÇÃO DE PRODUTOS
-            </label>
+            <label className={clsLabel}>2. PESQUISA E SELEÇÃO DE PRODUTOS</label>
             <div className="grid grid-cols-3 gap-2">
               <input
                 type="text"
-                placeholder="Digite ou Selecione o Produto (Ex: Yerba Display...)"
+                placeholder="Digite ou Selecione o Produto (Ex: Display Yerba...)"
                 value={buscaProduto}
                 onFocus={() => setMostrarDropdown(true)}
                 onChange={(e) => {
@@ -589,6 +639,7 @@ export default function LancarVendaPage() {
                 Adicionar
               </button>
             </div>
+
             {mostrarDropdown && produtosFiltrados.length > 0 && (
               <div className="absolute z-20 w-full mt-1 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl max-h-52 overflow-y-auto divide-y divide-slate-800">
                 {produtosFiltrados.map((p) => (
@@ -606,11 +657,11 @@ export default function LancarVendaPage() {
               </div>
             )}
           </div>
+
           {/* 3. ITENS DA VENDA */}
           <div className="space-y-1.5">
-            <label className={clsLabel}>
-              3. ITENS DA VENDA ({itens.length})
-            </label>
+            <label className={clsLabel}>3. ITENS DA VENDA ({itens.length})</label>
+
             {itens.length === 0 ? (
               <div className="p-4 text-sm text-slate-500 border border-slate-800 rounded-xl text-center">
                 Nenhum item ainda — importe o PDF ou adicione manualmente acima.
@@ -618,16 +669,25 @@ export default function LancarVendaPage() {
             ) : (
               <div className="border border-slate-800 rounded-xl overflow-hidden divide-y divide-slate-800">
                 {itens.map((it, index) => {
-                  const produtoVinculado = produtos.find(
+                  // Busca no catálogo completo: produto oculto continua aparecendo com nome correto
+                  const produtoVinculado = catalogo.find(
                     (p) => p.id === it.produtoId,
                   );
+
                   return (
                     <div key={index} className="p-3 bg-slate-950/60 space-y-2">
                       <div className="flex justify-between items-start gap-2">
                         <div className="flex-1 min-w-0">
                           {produtoVinculado ? (
-                            <span className="text-sm font-semibold text-emerald-400">
+                            <span
+                              className={`text-sm font-semibold ${
+                                produtoVinculado.ativo
+                                  ? "text-emerald-400"
+                                  : "text-amber-300"
+                              }`}
+                            >
                               {produtoVinculado.nome}
+                              {!produtoVinculado.ativo && " (oculto no cadastro)"}
                             </span>
                           ) : (
                             <span className="text-sm font-semibold text-amber-400">
@@ -643,6 +703,7 @@ export default function LancarVendaPage() {
                           Remover
                         </button>
                       </div>
+
                       {!produtoVinculado && (
                         <select
                           value=""
@@ -655,13 +716,14 @@ export default function LancarVendaPage() {
                           <option value="">
                             — Selecione o produto do catálogo —
                           </option>
-                          {produtos.map((p) => (
+                          {produtosAtivos.map((p) => (
                             <option key={p.id} value={p.id}>
                               {p.nome}
                             </option>
                           ))}
                         </select>
                       )}
+
                       <div className="grid grid-cols-3 gap-2 text-sm">
                         <label className="text-[11px] text-slate-500">
                           Qtd
@@ -679,6 +741,7 @@ export default function LancarVendaPage() {
                             className={clsItemInput}
                           />
                         </label>
+
                         <label className="text-[11px] text-slate-500">
                           Preço Unit. (R$)
                           <input
@@ -696,6 +759,7 @@ export default function LancarVendaPage() {
                             className={clsItemInput}
                           />
                         </label>
+
                         <div className="text-[11px] text-slate-500">
                           Subtotal
                           <div className="mt-1 p-2 border border-slate-800 rounded-lg bg-slate-900 text-slate-300 font-bold">
@@ -726,6 +790,7 @@ export default function LancarVendaPage() {
                 ))}
               </select>
             </div>
+
             <div className="grid grid-cols-3 gap-3">
               {deducoes.map(([rotulo, valor, setValor]) => (
                 <div key={rotulo} className="space-y-1.5">
@@ -741,10 +806,11 @@ export default function LancarVendaPage() {
                 </div>
               ))}
             </div>
+
             {ehOrcamento(formaPagamento) && (
               <div className="p-3 border border-amber-500/30 bg-amber-950/40 text-amber-400 rounded-xl text-xs">
                 💡 Orçamento não desconta estoque. Para virar venda, use o botão
-                "Converter" no Histórico de Vendas — aí sim o estoque é
+                &quot;Converter&quot; no Histórico de Vendas — aí sim o estoque é
                 descontado.
               </div>
             )}
